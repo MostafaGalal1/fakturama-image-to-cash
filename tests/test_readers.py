@@ -2,8 +2,11 @@ import json
 
 import pytest
 from PIL import Image
+from pydantic import ValidationError
 
+from image_to_cash.model import Order
 from image_to_cash.readers import ReaderError, build_reader
+from image_to_cash.readers.base import MAX_ISSUES_SHOWN, describe_validation_error
 
 MAX_MESSAGE_LENGTH = 600
 
@@ -64,3 +67,13 @@ def test_invalid_fixture_message_omits_the_offending_value(tmp_path, prepared_im
     with pytest.raises(ReaderError, match="order_date") as caught:
         build_reader("fixture", fixture=fixture).read(prepared_image)
     assert "SECRET-VALUE" not in str(caught.value)
+
+
+def test_validation_summary_lists_a_few_problems_and_counts_the_rest():
+    with pytest.raises(ValidationError) as caught:
+        Order.model_validate({})
+    hidden = len(caught.value.errors()) - MAX_ISSUES_SHOWN
+    summary = describe_validation_error(caught.value)
+    assert hidden > 0
+    assert summary.count(";") == MAX_ISSUES_SHOWN - 1
+    assert summary.endswith(f"(+{hidden} more)")
