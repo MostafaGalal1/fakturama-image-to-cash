@@ -751,19 +751,31 @@ git commit -m "feat: check order arithmetic and business invariants"
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from image_to_cash.errors import NeedsReview
-from image_to_cash.normalized import gross_price, normalize, split_contact_name
+from image_to_cash.model import PaymentMethod
+from image_to_cash.normalized import NormalizedOrder, gross_price, normalize, split_contact_name
 
 
 def test_split_contact_name():
     assert split_contact_name("Marta Klein") == ("Marta", "Klein")
 
 
-def test_split_contact_name_rejects_ambiguous_names():
+def test_split_contact_name_accepts_last_comma_first():
+    assert split_contact_name("Klein, Anna Maria") == ("Anna Maria", "Klein")
+
+
+@pytest.mark.parametrize("name", ["Anna Maria Klein", "Dr. Klein", "Marta K.", "Klein,", "Marta"])
+def test_split_contact_name_refuses_to_guess(name):
     with pytest.raises(NeedsReview) as excinfo:
-        split_contact_name("Anna Maria Klein")
+        split_contact_name(name)
     assert excinfo.value.reason == "contact_name_ambiguous"
+    assert excinfo.value.details == {"contact_name": name}
+
+
+def test_needs_review_message_includes_details():
+    assert str(NeedsReview("conflicting_sku_lines", {"sku": "X-1"})) == "conflicting_sku_lines: sku=X-1"
 
 
 def test_gross_price_for_sample_products():
@@ -771,17 +783,35 @@ def test_gross_price_for_sample_products():
     assert gross_price(Decimal("40.00"), Decimal("19")) == Decimal("47.60")
 
 
-def test_gross_price_rounds_half_up():
-    assert gross_price(Decimal("1.25"), Decimal("19")) == Decimal("1.49")
+def test_gross_price_rounds_half_up_on_ties():
+    # 1.50 × 1.19 = 1.785: half-up gives 1.79, banker's rounding would give 1.78.
+    assert gross_price(Decimal("1.50"), Decimal("19")) == Decimal("1.79")
 
 
 def test_normalize_sample(sample_order):
     normalized = normalize(sample_order)
-    assert (normalized.debtor.first_name, normalized.debtor.last_name) == ("Marta", "Klein")
-    assert normalized.debtor.delivery_differs is True
+    debtor = normalized.debtor
+    assert (debtor.first_name, debtor.last_name) == ("Marta", "Klein")
+    assert debtor.delivery_differs is True
     assert normalized.source_customer_id == "CUST-1007"
-    assert [p.gross_price for p in normalized.products] == [Decimal("297.50"), Decimal("47.60")]
-    assert [line.sku for line in normalized.lines] == ["CHR-ERGO-01", "MAT-DESK-02"]
+    assert normalized.payment.method is PaymentMethod.BANK_TRANSFER
+    assert normalized.totals == sample_order.totals
+    assert [(p.sku, p.gross_price, p.vat_percent) for p in normalized.products] == [
+        ("CHR-ERGO-01", Decimal("297.50"), Decimal("19")),
+        ("MAT-DESK-02", Decimal("47.60"), Decimal("19")),
+    ]
+    assert [
+        (line.sku, line.quantity, line.discount_percent, line.line_net_total)
+        for line in normalized.lines
+    ] == [
+        ("CHR-ERGO-01", Decimal("2"), Decimal("10"), Decimal("450.00")),
+        ("MAT-DESK-02", Decimal("3"), Decimal("0"), Decimal("120.00")),
+    ]
+
+
+def test_normalized_order_json_round_trip(sample_order):
+    normalized = normalize(sample_order)
+    assert NormalizedOrder.model_validate_json(normalized.model_dump_json()) == normalized
 
 
 def test_same_billing_and_delivery_is_not_flagged(sample_order):
@@ -789,19 +819,51 @@ def test_same_billing_and_delivery_is_not_flagged(sample_order):
     assert normalize(order).debtor.delivery_differs is False
 
 
-def test_repeated_sku_lines_share_one_product(sample_order):
+def test_name_line_difference_alone_counts_as_different(sample_order):
+    delivery = sample_order.billing_address.model_copy(update={"name": "Northstar Office Warehouse"})
+    order = sample_order.model_copy(update={"delivery_address": delivery})
+    assert normalize(order).debtor.delivery_differs is True
+
+
+def test_same_sku_lines_with_different_quantity_share_one_product(sample_order):
     first = sample_order.items[0]
-    normalized = normalize(sample_order.model_copy(update={"items": (first, first)}))
+    second = first.model_copy(
+        update={"quantity": Decimal("1"), "discount_percent": Decimal("0"), "line_net_total": Decimal("250.00")}
+    )
+    normalized = normalize(sample_order.model_copy(update={"items": (first, second)}))
     assert len(normalized.products) == 1
-    assert len(normalized.lines) == 2
+    assert [line.discount_percent for line in normalized.lines] == [Decimal("10"), Decimal("0")]
 
 
-def test_conflicting_sku_lines_need_review(sample_order):
+@pytest.mark.parametrize(
+    "change",
+    [{"unit_net_price": Decimal("260.00")}, {"description": "Other Chair"}, {"vat_percent": Decimal("7")}],
+    ids=["price", "description", "vat"],
+)
+def test_conflicting_sku_lines_need_review(sample_order, change):
     first = sample_order.items[0]
-    other_price = first.model_copy(update={"unit_net_price": Decimal("260.00")})
+    items = (first, first.model_copy(update=change))
     with pytest.raises(NeedsReview) as excinfo:
-        normalize(sample_order.model_copy(update={"items": (first, other_price)}))
+        normalize(sample_order.model_copy(update={"items": items}))
     assert excinfo.value.reason == "conflicting_sku_lines"
+    assert excinfo.value.details == {"sku": "CHR-ERGO-01"}
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda d: d | {"lines": [d["lines"][0] | {"sku": "UNKNOWN"}, d["lines"][1]]},
+        lambda d: d | {"products": [d["products"][0], d["products"][0]]},
+        lambda d: d | {"lines": [d["lines"][0] | {"vat_percent": "7"}, d["lines"][1]]},
+        lambda d: d | {"debtor": d["debtor"] | {"first_name": " "}},
+        lambda d: d | {"products": [d["products"][0] | {"gross_price": "-1.00"}, d["products"][1]]},
+    ],
+    ids=["line-sku-without-product", "duplicate-product", "line-vat-differs", "blank-name", "negative-gross"],
+)
+def test_edited_order_json_is_validated(sample_order, edit):
+    data = edit(normalize(sample_order).model_dump(mode="json"))
+    with pytest.raises(ValidationError):
+        NormalizedOrder.model_validate(data)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -822,71 +884,124 @@ class NeedsReview(Exception):
         super().__init__(reason)
         self.reason = reason
         self.details = dict(details or {})
+
+    def __str__(self) -> str:
+        if not self.details:
+            return self.reason
+        listed = ", ".join(f"{key}={value}" for key, value in self.details.items())
+        return f"{self.reason}: {listed}"
 ```
 
 - [ ] **Step 4: Implement `src/image_to_cash/normalized.py`**
 
 ```python
-"""Stage-2 contract: the extracted order mapped onto what Fakturama needs (design §4, step 6)."""
+"""Stage-2 contract: the extracted order mapped onto what Fakturama needs (design §4, step 6).
+
+Precondition: callers run `check_invariants` first; `normalize` does no arithmetic checking.
+The contract is re-validated whenever order.json is loaded, because a person may have edited it.
+"""
 
 from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from image_to_cash.errors import NeedsReview
 from image_to_cash.invariants import HUNDRED, money
-from image_to_cash.model import Address, Frozen, LineItem, Order, Payment, PaymentMethod, Totals
+from image_to_cash.model import (
+    Address,
+    Amount,
+    Frozen,
+    LineItem,
+    NonEmptyStr,
+    Order,
+    Payment,
+    Percent,
+    Quantity,
+    Totals,
+)
+
+# A gross price can exceed a net Amount's 12 digits (net × up to 2), so it gets one more digit.
+GrossPrice = Annotated[Decimal, Field(ge=0, max_digits=13, decimal_places=2)]
 
 
 class Debtor(Frozen):
-    company: str
-    first_name: str
-    last_name: str
-    alias: str
-    email: str
-    phone: str
+    company: NonEmptyStr
+    first_name: NonEmptyStr
+    last_name: NonEmptyStr
+    alias: NonEmptyStr
+    email: NonEmptyStr
+    phone: NonEmptyStr
     billing_address: Address
     delivery_address: Address
-    delivery_differs: bool
-    payment_method: PaymentMethod
+
+    @property
+    def delivery_differs(self) -> bool:
+        """Exact comparison of all fields, name line included: a false 'same' would misship."""
+        return self.billing_address != self.delivery_address
 
 
 class Product(Frozen):
-    sku: str
-    name: str
-    description: str
-    gross_price: Decimal
-    vat_percent: Decimal
+    """Master data. Fakturama's Name and Description both get `description`.
+
+    `gross_price` is net × (1 + VAT) and never includes a line discount.
+    """
+
+    sku: NonEmptyStr
+    description: NonEmptyStr
+    gross_price: GrossPrice
+    vat_percent: Percent
 
 
 class OrderLine(Frozen):
-    sku: str
-    quantity: Decimal
-    unit_net_price: Decimal
-    discount_percent: Decimal
-    vat_percent: Decimal
-    line_net_total: Decimal
+    """One Order line as typed into Fakturama: U.Price is the net unit price."""
+
+    sku: NonEmptyStr
+    quantity: Quantity
+    unit_net_price: Amount
+    discount_percent: Percent
+    vat_percent: Percent
+    line_net_total: Amount
 
 
 class NormalizedOrder(Frozen):
-    external_reference: str
+    external_reference: NonEmptyStr
     order_date: date
-    source_customer_id: str | None
+    source_customer_id: str | None  # recorded only; Fakturama proposes its own Customer ID
     debtor: Debtor
     products: tuple[Product, ...] = Field(min_length=1)
     lines: tuple[OrderLine, ...] = Field(min_length=1)
     payment: Payment
     totals: Totals
 
+    @model_validator(mode="after")
+    def _lines_match_products(self) -> NormalizedOrder:
+        vat_by_sku = {product.sku: product.vat_percent for product in self.products}
+        if len(vat_by_sku) != len(self.products):
+            raise ValueError("product SKUs must be unique")
+        for line in self.lines:
+            if line.sku not in vat_by_sku:
+                raise ValueError(f"line SKU {line.sku} has no product")
+            if line.vat_percent != vat_by_sku[line.sku]:
+                raise ValueError(f"line SKU {line.sku} has a different VAT than its product")
+        return self
+
 
 def split_contact_name(full_name: str) -> tuple[str, str]:
+    """Accept 'First Last', or 'Last, First Names' (how a reviewer writes multi-word names)."""
+    if "," in full_name:
+        last, _, first = full_name.partition(",")
+        last, first = last.strip(), first.strip()
+        if last and first and "," not in first:
+            return first, last
+        raise _ambiguous_name(full_name)
     parts = full_name.split()
-    if len(parts) != 2:
-        raise NeedsReview("contact_name_ambiguous", {"contact_name": full_name})
-    return parts[0], parts[1]
+    if len(parts) == 2 and not any(part.endswith(".") for part in parts):
+        return parts[0], parts[1]
+    raise _ambiguous_name(full_name)
 
 
 def gross_price(net: Decimal, vat_percent: Decimal) -> Decimal:
@@ -894,22 +1009,21 @@ def gross_price(net: Decimal, vat_percent: Decimal) -> Decimal:
 
 
 def normalize(order: Order) -> NormalizedOrder:
-    first_name, last_name = split_contact_name(order.customer.contact_name)
+    customer = order.customer
+    first_name, last_name = split_contact_name(customer.contact_name)
     return NormalizedOrder(
         external_reference=order.external_reference,
         order_date=order.order_date,
-        source_customer_id=order.customer.customer_id,
+        source_customer_id=customer.customer_id,
         debtor=Debtor(
-            company=order.customer.company,
+            company=customer.company,
             first_name=first_name,
             last_name=last_name,
-            alias=order.customer.alias,
-            email=order.customer.email,
-            phone=order.customer.phone,
+            alias=customer.alias,
+            email=customer.email,
+            phone=customer.phone,
             billing_address=order.billing_address,
             delivery_address=order.delivery_address,
-            delivery_differs=order.billing_address != order.delivery_address,
-            payment_method=order.payment.method,
         ),
         products=_products(order.items),
         lines=tuple(_line(item) for item in order.items),
@@ -918,21 +1032,26 @@ def normalize(order: Order) -> NormalizedOrder:
     )
 
 
+def _ambiguous_name(full_name: str) -> NeedsReview:
+    return NeedsReview("contact_name_ambiguous", {"contact_name": full_name})
+
+
 def _products(items: tuple[LineItem, ...]) -> tuple[Product, ...]:
     by_sku: dict[str, Product] = {}
     for item in items:
-        product = Product(
-            sku=item.sku,
-            name=item.description,
-            description=item.description,
-            gross_price=gross_price(item.unit_net_price, item.vat_percent),
-            vat_percent=item.vat_percent,
-        )
-        existing = by_sku.get(item.sku)
-        if existing is not None and existing != product:
+        product = _product(item)
+        if by_sku.setdefault(item.sku, product) != product:
             raise NeedsReview("conflicting_sku_lines", {"sku": item.sku})
-        by_sku = {**by_sku, item.sku: product}
     return tuple(by_sku.values())
+
+
+def _product(item: LineItem) -> Product:
+    return Product(
+        sku=item.sku,
+        description=item.description,
+        gross_price=gross_price(item.unit_net_price, item.vat_percent),
+        vat_percent=item.vat_percent,
+    )
 
 
 def _line(item: LineItem) -> OrderLine:
@@ -949,7 +1068,7 @@ def _line(item: LineItem) -> OrderLine:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_normalized.py -q`
-Expected: `8 passed`
+Expected: `23 passed`
 
 - [ ] **Step 6: Commit**
 
@@ -1416,7 +1535,7 @@ def order_image(tmp_path) -> Path:
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -q`
-Expected: all passed (`56 passed` on macOS)
+Expected: all passed (`71 passed` on macOS)
 
 - [ ] **Step 6: Commit**
 
@@ -1660,7 +1779,7 @@ def extract(image_path: Path, reader: ImageReader, ocr: OcrEngine) -> Extraction
     try:
         normalized = normalize(order)
     except NeedsReview as review:
-        review_issue = Issue(review.reason, str(review.details))
+        review_issue = Issue(review.reason, str(review))
         return ExtractionResult(order, None, mismatches, (*issues, review_issue))
     return ExtractionResult(order, normalized, mismatches, issues)
 ```
@@ -1869,7 +1988,7 @@ def _approve(args: argparse.Namespace) -> int:
     try:
         normalized = normalize(order)
     except NeedsReview as review:
-        print(f"not approved: {review.reason} {review.details}", file=sys.stderr)
+        print(f"not approved: {review}", file=sys.stderr)
         return EXIT_REVIEW
     args.out.mkdir(parents=True, exist_ok=True)
     target = args.out / ORDER_FILE

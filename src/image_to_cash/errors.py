@@ -8,3 +8,9 @@ class NeedsReview(Exception):
         super().__init__(reason)
         self.reason = reason
         self.details = dict(details or {})
+
+    def __str__(self) -> str:
+        if not self.details:
+            return self.reason
+        listed = ", ".join(f"{key}={value}" for key, value in self.details.items())
+        return f"{self.reason}: {listed}"
