@@ -1314,10 +1314,12 @@ git commit -m "feat: add image loading, upscaling and OCR preparation"
 
 `tests/test_ocr.py`:
 ```python
+import sys
+
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from image_to_cash.ocr import Box, build_ocr
+from image_to_cash.ocr import Box, OcrError, build_ocr
 
 
 def test_box_center():
@@ -1327,6 +1329,30 @@ def test_box_center():
 def test_unknown_engine_is_rejected():
     with pytest.raises(ValueError, match="unknown OCR engine"):
         build_ocr("nope")
+
+
+def test_missing_vision_framework_is_an_ocr_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "Vision", None)
+    monkeypatch.delitem(sys.modules, "image_to_cash.ocr.macos_vision", raising=False)
+    with pytest.raises(OcrError, match="pyobjc-framework-Vision"):
+        build_ocr("macos-vision")
+
+
+@pytest.mark.macos
+@pytest.mark.parametrize(
+    ("rect", "expected"),
+    [
+        ((0.0, 0.0, 1.0, 1.0), Box(0, 0, 200, 100)),
+        ((0.1, 0.9, 0.5, 0.1), Box(20, 0, 100, 10)),
+        ((0.1, 0.0, 0.5, 0.1), Box(20, 90, 100, 10)),
+        ((-0.125, 0.9375, 0.5, 0.125), Box(0, 0, 75, 6)),
+    ],
+    ids=["whole-image", "top-strip", "bottom-strip", "clamped-to-image"],
+)
+def test_vision_rect_becomes_top_left_pixel_box(rect, expected):
+    from image_to_cash.ocr.macos_vision import vision_rect_to_box  # imports Vision: macOS only
+
+    assert vision_rect_to_box(*rect, width=200, height=100) == expected
 
 
 def render(text: str) -> Image.Image:
@@ -1388,6 +1414,11 @@ class TextBox:
 
 
 class OcrEngine(Protocol):
+    """Each box holds an engine-defined text run (a line or a word), in engine-defined order.
+
+    Callers search the texts; they must not rely on box order or on neighbouring boxes.
+    """
+
     def recognize(self, image: Image.Image) -> tuple[TextBox, ...]: ...
 ```
 
@@ -1421,6 +1452,15 @@ class MacVisionOcr:
         return tuple(box for box in boxes if box is not None)
 
 
+def vision_rect_to_box(x: float, y: float, w: float, h: float, width: int, height: int) -> Box:
+    """Vision's normalised rect (origin bottom-left) as a top-left pixel box inside the image."""
+    left = _clamp(round(x * width), width)
+    right = _clamp(round((x + w) * width), width)
+    top = _clamp(round((1 - y - h) * height), height)
+    bottom = _clamp(round((1 - y) * height), height)
+    return Box(x=left, y=top, width=right - left, height=bottom - top)
+
+
 def _png_data(image: Image.Image) -> NSData:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -1433,14 +1473,13 @@ def _to_text_box(observation, width: int, height: int) -> TextBox | None:
     if not candidates:
         return None
     candidate = candidates[0]
-    rect = observation.boundingBox()  # normalised, origin bottom-left
-    box = Box(
-        x=round(rect.origin.x * width),
-        y=round((1 - rect.origin.y - rect.size.height) * height),
-        width=round(rect.size.width * width),
-        height=round(rect.size.height * height),
-    )
+    rect = observation.boundingBox()
+    box = vision_rect_to_box(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height, width, height)
     return TextBox(text=str(candidate.string()), box=box, confidence=float(candidate.confidence()))
+
+
+def _clamp(value: int, limit: int) -> int:
+    return min(max(value, 0), limit)
 ```
 
 - [ ] **Step 5: Implement `src/image_to_cash/ocr/__init__.py`**
@@ -1455,8 +1494,10 @@ ENGINES = ("macos-vision",)
 
 def build_ocr(name: str) -> OcrEngine:
     if name == "macos-vision":
-        from image_to_cash.ocr.macos_vision import MacVisionOcr
-
+        try:
+            from image_to_cash.ocr.macos_vision import MacVisionOcr
+        except ImportError as error:
+            raise OcrError("macos-vision OCR needs macOS with pyobjc-framework-Vision installed") from error
         return MacVisionOcr()
     raise ValueError(f"unknown OCR engine: {name!r} (available: {', '.join(ENGINES)})")
 
@@ -1467,7 +1508,7 @@ __all__ = ["ENGINES", "Box", "OcrEngine", "OcrError", "TextBox", "build_ocr"]
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_ocr.py -q`
-Expected: `3 passed` on macOS.
+Expected: `8 passed` on macOS.
 
 - [ ] **Step 7: Commit**
 
@@ -1675,7 +1716,7 @@ def order_image(tmp_path) -> Path:
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -q`
-Expected: all passed (`89 passed` on macOS)
+Expected: all passed (`94 passed` on macOS)
 
 - [ ] **Step 6: Commit**
 

@@ -7,8 +7,10 @@ ENGINES = ("macos-vision",)
 
 def build_ocr(name: str) -> OcrEngine:
     if name == "macos-vision":
-        from image_to_cash.ocr.macos_vision import MacVisionOcr
-
+        try:
+            from image_to_cash.ocr.macos_vision import MacVisionOcr
+        except ImportError as error:
+            raise OcrError("macos-vision OCR needs macOS with pyobjc-framework-Vision installed") from error
         return MacVisionOcr()
     raise ValueError(f"unknown OCR engine: {name!r} (available: {', '.join(ENGINES)})")
 

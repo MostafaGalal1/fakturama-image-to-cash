@@ -25,6 +25,15 @@ class MacVisionOcr:
         return tuple(box for box in boxes if box is not None)
 
 
+def vision_rect_to_box(x: float, y: float, w: float, h: float, width: int, height: int) -> Box:
+    """Vision's normalised rect (origin bottom-left) as a top-left pixel box inside the image."""
+    left = _clamp(round(x * width), width)
+    right = _clamp(round((x + w) * width), width)
+    top = _clamp(round((1 - y - h) * height), height)
+    bottom = _clamp(round((1 - y) * height), height)
+    return Box(x=left, y=top, width=right - left, height=bottom - top)
+
+
 def _png_data(image: Image.Image) -> NSData:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -37,11 +46,10 @@ def _to_text_box(observation, width: int, height: int) -> TextBox | None:
     if not candidates:
         return None
     candidate = candidates[0]
-    rect = observation.boundingBox()  # normalised, origin bottom-left
-    box = Box(
-        x=round(rect.origin.x * width),
-        y=round((1 - rect.origin.y - rect.size.height) * height),
-        width=round(rect.size.width * width),
-        height=round(rect.size.height * height),
-    )
+    rect = observation.boundingBox()
+    box = vision_rect_to_box(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height, width, height)
     return TextBox(text=str(candidate.string()), box=box, confidence=float(candidate.confidence()))
+
+
+def _clamp(value: int, limit: int) -> int:
+    return min(max(value, 0), limit)

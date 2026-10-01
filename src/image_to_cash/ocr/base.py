@@ -32,4 +32,9 @@ class TextBox:
 
 
 class OcrEngine(Protocol):
+    """Each box holds an engine-defined text run (a line or a word), in engine-defined order.
+
+    Callers search the texts; they must not rely on box order or on neighbouring boxes.
+    """
+
     def recognize(self, image: Image.Image) -> tuple[TextBox, ...]: ...

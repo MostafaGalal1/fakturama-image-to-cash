@@ -31,7 +31,7 @@ order.png
   │
   ▼  Stage 1: EXTRACT (network)
   Vision LLM (pluggable) → schema JSON ─┐
-  OCR engine (pluggable) → word tokens ─┴─► reconcile + validate ─► order.json (immutable)
+  OCR engine (pluggable) → text boxes  ─┴─► reconcile + validate ─► order.json (immutable)
                                                         │ fails ─► manual-review bundle
   ▼  Stage 2: DRIVE (local only)
   Flow state machine ─► screen objects ─► UI backend (UIA | AX | AT-SPI) + grid OCR ─► Fakturama
@@ -44,14 +44,14 @@ order.png
 - **Stack:** Python 3.12 (runs on all three OSes) · Pydantic for the data contract · `Decimal` for all money maths · `mss` for screenshots. Everything OS- or vendor-specific sits behind one of three **swappable interfaces**. Config picks the implementation; the flow doesn't change.
   - *UI backend*: find an element (by neutral role, name or label, and container), read and set its value, click it, press keys, list top-level windows, and get its rectangle. Adapters: **macOS AX via `pyobjc`** (development platform, built in v1), **Windows UIA via `pywinauto`** (the reference, built in v1) and Linux AT-SPI via `pyatspi` (designed for, not built). Each adapter owns four things. First, role mapping: a *text field* is `Edit` in UIA, `AXTextField` in AX and `text` in AT-SPI. Second, the shortcut modifier, Ctrl or Cmd. Third, scaling DPI and Retina coordinates to physical pixels. Fourth, OS permissions, such as macOS Accessibility and Screen Recording.
   - *Image reader*: takes an image and returns order fields matching the Pydantic schema. Adapters: Claude (Anthropic API or Vertex AI), Gemini (Vertex AI) and Document AI Custom Extractor, each using its provider's structured-output feature. Every result is re-validated against the same schema.
-  - *OCR engine*: takes an image or a region of one and returns words with boxes (and confidence where the engine provides it). Adapters: Windows built-in OCR and the macOS Vision framework (both local, no setup, each the default on its OS), Google Cloud Vision (for poor-quality scans), and Tesseract (offline, any OS).
+  - *OCR engine*: takes an image or a region of one and returns text runs (lines or words, depending on the engine) with boxes, and confidence where the engine provides it. Adapters: Windows built-in OCR and the macOS Vision framework (both local, no setup, each the default on its OS), Google Cloud Vision (for poor-quality scans), and Tesseract (offline, any OS).
   - Every adapter must pass the same contract and golden tests (§8), so a new OS or vendor is a new adapter, not a redesign.
 
 ## 4. Image-extraction strategy
 
 1. **Preprocess.** Apply EXIF rotation, flatten transparency onto white, then upscale 3× (Lanczos, long edge capped at 4000 px). The LLM gets the colour image; OCR gets a grayscale, sharpened copy.
 2. **LLM read.** One call at temperature 0, using the configured provider's structured-output feature (tool calling for Claude, response schema for Gemini) with the `Order` model as the schema. The prompt says to **transcribe exactly what is printed**, never compute or correct, and to return `null` for anything absent. Each critical field carries both its raw string and its parsed value.
-3. **Independent OCR read** of the whole image produces word tokens with boxes.
+3. **Independent OCR read** of the whole image produces text runs with boxes.
 4. **Reconcile critical fields**, each of which must also appear in the OCR tokens after normalising look-alikes (O/0, I/1, spacing): external reference, dates, SKUs, unit prices, discounts, VAT %, line and order totals, streets, ZIP codes, phone and paid status. Quantities are checked indirectly, because a wrong quantity breaks the line-total invariant. On a mismatch, the LLM gets one retry on a zoomed crop around that field's OCR location. If it still disagrees, the run goes to manual review. **The bot never guesses.**
 5. **Invariants** (exact decimal arithmetic, ROUND_HALF_UP). Each line net = qty × unit × (1 − disc/100); for the sample, 2 × 250.00 × 0.90 = 450.00 and 3 × 40.00 = 120.00. The lines must sum to the net total (570.00), Σ(line net × VAT%) must equal the VAT total (108.30), and net + VAT must equal gross (678.30). VAT is summed across lines and rounded once. Stage 2 checks empirically whether Fakturama rounds the same way; a 1-cent difference goes to review. The payment method must be one of the three supported ones, PAID requires a payment date, and all dates must be valid.
 6. **Normalise to Fakturama's shape.** Split the contact name into first and last (more than two words goes to review). Split each address into street, ZIP, city and country. Flag billing ≠ delivery. Precompute the Product gross price = round(net × (1 + VAT/100), 2), e.g. 297.50 and 47.60.
