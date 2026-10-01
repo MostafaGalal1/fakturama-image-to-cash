@@ -8,7 +8,7 @@ from PIL import Image
 from pydantic import ValidationError
 
 from image_to_cash.model import Order
-from image_to_cash.readers.base import ReaderError
+from image_to_cash.readers.base import ReaderError, describe_validation_error
 
 
 class FixtureReader:
@@ -17,6 +17,11 @@ class FixtureReader:
 
     def read(self, image: Image.Image) -> Order:
         try:
-            return Order.model_validate_json(self._fixture_path.read_text(encoding="utf-8"))
-        except (OSError, ValidationError) as error:
-            raise ReaderError(f"fixture {self._fixture_path} is unusable: {error}") from error
+            recorded = self._fixture_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise ReaderError(f"fixture {self._fixture_path} cannot be read: {error}") from error
+        try:
+            return Order.model_validate_json(recorded)
+        except ValidationError as error:
+            problems = describe_validation_error(error)
+            raise ReaderError(f"fixture {self._fixture_path} is not a valid order: {problems}") from error

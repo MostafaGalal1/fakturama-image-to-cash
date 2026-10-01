@@ -1931,10 +1931,14 @@ git commit -m "feat: cross-check critical order fields against OCR text"
 
 `tests/test_readers.py`:
 ```python
+import json
+
 import pytest
 from PIL import Image
 
 from image_to_cash.readers import ReaderError, build_reader
+
+MAX_MESSAGE_LENGTH = 600
 
 
 @pytest.fixture
@@ -1945,6 +1949,13 @@ def prepared_image() -> Image.Image:
 def test_fixture_reader_replays_recorded_order(sample_order_path, prepared_image, sample_order):
     reader = build_reader("fixture", fixture=sample_order_path)
     assert reader.read(prepared_image) == sample_order
+
+
+def test_fixture_reader_reads_the_path_it_was_given(tmp_path, prepared_image, sample_order):
+    other = tmp_path / "other.json"
+    other_order = sample_order.model_copy(update={"external_reference": "OTHER-1"})
+    other.write_text(other_order.model_dump_json(), encoding="utf-8")
+    assert build_reader("fixture", fixture=other).read(prepared_image).external_reference == "OTHER-1"
 
 
 def test_fixture_reader_requires_a_path():
@@ -1959,15 +1970,33 @@ def test_unknown_reader_is_rejected():
 
 def test_missing_fixture_raises_reader_error(tmp_path, prepared_image):
     reader = build_reader("fixture", fixture=tmp_path / "missing.json")
-    with pytest.raises(ReaderError):
+    with pytest.raises(ReaderError, match="missing.json"):
         reader.read(prepared_image)
 
 
-def test_invalid_fixture_raises_reader_error(tmp_path, prepared_image):
+def test_non_utf8_fixture_raises_reader_error(tmp_path, prepared_image):
+    latin1 = tmp_path / "latin1.json"
+    latin1.write_bytes(b'{"external_reference": "\xe9"}')
+    with pytest.raises(ReaderError, match="latin1.json"):
+        build_reader("fixture", fixture=latin1).read(prepared_image)
+
+
+@pytest.mark.parametrize("content", ["", "{not json", "[]", '{"surprise": 1}', '{"external_reference": "X"}'])
+def test_invalid_fixture_raises_a_short_reader_error(tmp_path, prepared_image, content):
     bad = tmp_path / "bad.json"
-    bad.write_text('{"external_reference": "X"}', encoding="utf-8")
-    with pytest.raises(ReaderError):
+    bad.write_text(content, encoding="utf-8")
+    with pytest.raises(ReaderError, match="bad.json") as caught:
         build_reader("fixture", fixture=bad).read(prepared_image)
+    assert len(str(caught.value)) < MAX_MESSAGE_LENGTH
+
+
+def test_invalid_fixture_message_omits_the_offending_value(tmp_path, prepared_image, sample_order):
+    fixture = tmp_path / "order.json"
+    recorded = sample_order.model_dump(mode="json") | {"order_date": "SECRET-VALUE"}
+    fixture.write_text(json.dumps(recorded), encoding="utf-8")
+    with pytest.raises(ReaderError, match="order_date") as caught:
+        build_reader("fixture", fixture=fixture).read(prepared_image)
+    assert "SECRET-VALUE" not in str(caught.value)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1985,8 +2014,11 @@ from __future__ import annotations
 from typing import Protocol
 
 from PIL import Image
+from pydantic import ValidationError
 
 from image_to_cash.model import Order
+
+MAX_ISSUES_SHOWN = 5
 
 
 class ReaderError(RuntimeError):
@@ -1995,8 +2027,27 @@ class ReaderError(RuntimeError):
 
 class ImageReader(Protocol):
     def read(self, image: Image.Image) -> Order:
-        """Read an image already prepared by `imaging`: upright, RGB and upscaled."""
+        """Read an image already prepared by `imaging`: upright, RGB and upscaled.
+
+        Must not modify `image` (copy it before resizing). Raises ReaderError when it cannot
+        produce a schema-valid Order.
+        """
         ...
+
+
+def describe_validation_error(error: ValidationError) -> str:
+    """A one-line summary of the first few problems, without the offending values.
+
+    The values are left out because a reader's output can hold personal data.
+    """
+    issues = error.errors(include_url=False, include_context=False, include_input=False)
+    shown = "; ".join(f"{_location(issue['loc'])}: {issue['msg']}" for issue in issues[:MAX_ISSUES_SHOWN])
+    hidden = len(issues) - MAX_ISSUES_SHOWN
+    return f"{shown} (+{hidden} more)" if hidden > 0 else shown
+
+
+def _location(loc: tuple[str | int, ...]) -> str:
+    return ".".join(str(part) for part in loc) or "<document>"
 ```
 
 - [ ] **Step 4: Implement `src/image_to_cash/readers/fixture.py`**
@@ -2012,7 +2063,7 @@ from PIL import Image
 from pydantic import ValidationError
 
 from image_to_cash.model import Order
-from image_to_cash.readers.base import ReaderError
+from image_to_cash.readers.base import ReaderError, describe_validation_error
 
 
 class FixtureReader:
@@ -2021,9 +2072,14 @@ class FixtureReader:
 
     def read(self, image: Image.Image) -> Order:
         try:
-            return Order.model_validate_json(self._fixture_path.read_text(encoding="utf-8"))
-        except (OSError, ValidationError) as error:
-            raise ReaderError(f"fixture {self._fixture_path} is unusable: {error}") from error
+            recorded = self._fixture_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise ReaderError(f"fixture {self._fixture_path} cannot be read: {error}") from error
+        try:
+            return Order.model_validate_json(recorded)
+        except ValidationError as error:
+            problems = describe_validation_error(error)
+            raise ReaderError(f"fixture {self._fixture_path} is not a valid order: {problems}") from error
 ```
 
 - [ ] **Step 5: Implement `src/image_to_cash/readers/__init__.py`**
@@ -2055,7 +2111,7 @@ __all__ = ["READERS", "FixtureReader", "ImageReader", "ReaderError", "build_read
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_readers.py -q`
-Expected: `5 passed`
+Expected: `12 passed`
 
 - [ ] **Step 7: Commit**
 
@@ -2159,7 +2215,7 @@ class ExtractionResult:
 
 def extract(image_path: Path, reader: ImageReader, ocr: OcrEngine) -> ExtractionResult:
     prepared = upscale(load_image(image_path))
-    order = reader.read(prepared)
+    order = reader.read(prepared.copy())  # a reader must not change what OCR sees
     text_boxes = ocr.recognize(for_ocr(prepared))
     mismatches = reconcile(order, text_boxes)
     issues = check_invariants(order)
@@ -2315,7 +2371,7 @@ from image_to_cash.readers import READERS, ReaderError, build_reader
 
 EXIT_OK = 0
 EXIT_ERROR = 1
-EXIT_REVIEW = 2
+EXIT_REVIEW = 3  # 2 is argparse's code for bad command-line usage
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2426,7 +2482,7 @@ Expected: `saved`
 
 Run: `uv run image-to-cash extract samples/sales-order-input.png --fixture tests/fixtures/sample_order.json --out out/sample`
 Expected:
-- Exit code 2 (`needs review`), with mismatches at least for the blurry fields listed in `sample_order.NOTES.md`.
+- Exit code 3 (`needs review`), with mismatches at least for the blurry fields listed in `sample_order.NOTES.md`.
 - If it exits 0 instead, OCR confirmed everything. Record that as well.
 
 - [ ] **Step 3: Record what OCR confirmed and what it didn't**
@@ -2480,7 +2536,7 @@ uv run image-to-cash extract samples/sales-order-input.png \
   --fixture tests/fixtures/sample_order.json --out out/sample
 ```
 
-Exit codes: `0` order.json written · `2` needs review (see review.json) · `1` error.
+Exit codes: `0` order.json written · `3` needs review (see review.json) · `1` error · `2` bad command-line usage.
 
 When review is needed, correct `draft_order` inside `review.json`, then:
 
