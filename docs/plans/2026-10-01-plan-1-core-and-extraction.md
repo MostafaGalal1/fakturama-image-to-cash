@@ -1545,7 +1545,7 @@ import pytest
 
 from image_to_cash.model import PaidStatus
 from image_to_cash.ocr import Box, TextBox
-from image_to_cash.reconcile import Mismatch, critical_fields, reconcile
+from image_to_cash.reconcile import Mismatch, critical_fields, fold, reconcile, value_pattern
 
 
 def text_boxes(texts):
@@ -1563,6 +1563,11 @@ def flagged(order, texts):
 def without_one(texts, value):
     index = texts.index(value)
     return texts[:index] + texts[index + 1 :]
+
+
+def inserted_after(texts, anchor, *new):
+    index = texts.index(anchor) + 1
+    return texts[:index] + new + texts[index:]
 
 
 def replaced(texts, old, new):
@@ -1641,12 +1646,27 @@ def test_values_inside_a_merged_table_row_are_found(sample_order):
 
 
 @pytest.mark.parametrize(
-    "printed", ["1.250,00", "1,250.00", "1 250,00", "1250.00", "EUR 1.250,00", "1.250,00 €"]
+    "printed", ["1.250,00", "1,250.00", "1'250.00", "1250.00", "EUR 1.250,00", "1.250,00 €"]
 )
 def test_thousands_separators_are_tolerated(sample_order, printed):
     totals = sample_order.totals.model_copy(update={"gross": Decimal("1250.00")})
     order = sample_order.model_copy(update={"totals": totals})
     assert "totals.gross" not in flagged(order, (printed,))
+
+
+def test_quantity_beside_a_price_is_not_a_thousands_group(sample_order):
+    order = with_item(sample_order, 0, unit_net_price=Decimal("2250.00"))
+    assert "items[0].unit_net_price" in flagged(order, ("2 250.00",))
+
+
+@pytest.mark.parametrize(("expected", "printed"), [("10117", "10117Berlin"), ("570.00", "EUR570.00")])
+def test_numbers_may_touch_letters(expected, printed):
+    assert value_pattern(expected).search(fold(printed))
+
+
+@pytest.mark.parametrize("printed", ["FOIL", "OILX"])
+def test_lookalike_only_words_keep_letter_boundaries(printed):
+    assert not value_pattern("OIL").search(fold(printed))
 
 
 @pytest.mark.parametrize("printed", ["10%", "1.0%", "100%"])
@@ -1687,7 +1707,8 @@ def test_zip_is_not_found_inside_the_phone_number(sample_order):
 
 def test_values_are_not_glued_across_boxes(sample_order):
     order = with_item(sample_order, 0, sku="CHR-ERGO-012")
-    texts = (*without_one(expected_texts(sample_order), "250.00"), "Qty 2", "50.00 EUR", "2")
+    texts = inserted_after(without_one(expected_texts(sample_order), "250.00"), "CHR-ERGO-01", "2")
+    texts = (*texts, "Qty 2", "50.00 EUR")
     assert flagged(order, texts) == ("items[0].sku", "items[0].unit_net_price")
 ```
 
@@ -1707,7 +1728,8 @@ match never spans two boxes, so neighbouring boxes cannot be glued into a value.
 
 Limits: the check ignores where a value sits, so two fields that swapped values (say billing
 and delivery ZIP) both pass; catching that needs box geometry. A thousands group printed with
-a space ("1 250.00") still contains "250.00" as whole tokens.
+a space ("1 250.00") still contains "250.00" as whole tokens. Space is not accepted as a
+thousands separator, so "2 250.00" (a quantity beside a price) never confirms 2250.00.
 """
 
 from __future__ import annotations
@@ -1724,7 +1746,7 @@ from image_to_cash.ocr.base import TextBox
 LOOKALIKES = str.maketrans({"O": "0", "I": "1", "L": "1", ",": "."})
 DASHES = str.maketrans(dict.fromkeys("‐‑‒–—−", "-"))
 AMOUNT = re.compile(r"\d+\.\d\d")
-THOUSANDS_SEPARATOR = r"[.'\s]?"
+THOUSANDS_SEPARATOR = r"[.']?"
 # Alphanumeric runs stay intact; OCR may add or drop spaces between runs and punctuation.
 TOKEN_PIECE = re.compile(r"[^\W_]+|\S")
 
@@ -1746,6 +1768,7 @@ def value_pattern(expected: str) -> re.Pattern[str]:
     """Matches the printed value as whole tokens inside one folded OCR line."""
     folded = fold(expected)
     body = _amount_body(folded) if AMOUNT.fullmatch(folded) else _text_body(folded)
+    # Decided before folding, so a value of lookalike letters only ("OIL") keeps letter edges.
     edge = r"\w" if any(char.isalpha() for char in expected) else "[0-9]"
     head = f"(?<!{edge})" + (r"(?<![0-9][.])" if folded[0].isdigit() else "")
     tail = f"(?!{edge})" if folded[-1].isalnum() else ""
@@ -1794,7 +1817,7 @@ def reconcile(order: Order, text_boxes: tuple[TextBox, ...]) -> tuple[Mismatch, 
 
 
 def _amount_body(amount: str) -> str:
-    """'1250.00' -> 1[.'\\s]?250\\.00, because a printed amount may group its thousands."""
+    """'1250.00' -> 1[.']?250\\.00, because a printed amount may group its thousands."""
     whole, cents = amount.split(".")
     groups = [whole[max(0, end - 3) : end] for end in range(len(whole), 0, -3)][::-1]
     return THOUSANDS_SEPARATOR.join(groups) + r"\." + cents
@@ -1888,7 +1911,7 @@ def order_image(tmp_path) -> Path:
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -q`
-Expected: all passed (`117 passed` on macOS)
+Expected: all passed (`122 passed` on macOS)
 
 - [ ] **Step 6: Commit**
 

@@ -6,7 +6,8 @@ match never spans two boxes, so neighbouring boxes cannot be glued into a value.
 
 Limits: the check ignores where a value sits, so two fields that swapped values (say billing
 and delivery ZIP) both pass; catching that needs box geometry. A thousands group printed with
-a space ("1 250.00") still contains "250.00" as whole tokens.
+a space ("1 250.00") still contains "250.00" as whole tokens. Space is not accepted as a
+thousands separator, so "2 250.00" (a quantity beside a price) never confirms 2250.00.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from image_to_cash.ocr.base import TextBox
 LOOKALIKES = str.maketrans({"O": "0", "I": "1", "L": "1", ",": "."})
 DASHES = str.maketrans(dict.fromkeys("‐‑‒–—−", "-"))
 AMOUNT = re.compile(r"\d+\.\d\d")
-THOUSANDS_SEPARATOR = r"[.'\s]?"
+THOUSANDS_SEPARATOR = r"[.']?"
 # Alphanumeric runs stay intact; OCR may add or drop spaces between runs and punctuation.
 TOKEN_PIECE = re.compile(r"[^\W_]+|\S")
 
@@ -45,6 +46,7 @@ def value_pattern(expected: str) -> re.Pattern[str]:
     """Matches the printed value as whole tokens inside one folded OCR line."""
     folded = fold(expected)
     body = _amount_body(folded) if AMOUNT.fullmatch(folded) else _text_body(folded)
+    # Decided before folding, so a value of lookalike letters only ("OIL") keeps letter edges.
     edge = r"\w" if any(char.isalpha() for char in expected) else "[0-9]"
     head = f"(?<!{edge})" + (r"(?<![0-9][.])" if folded[0].isdigit() else "")
     tail = f"(?!{edge})" if folded[-1].isalnum() else ""
@@ -93,7 +95,7 @@ def reconcile(order: Order, text_boxes: tuple[TextBox, ...]) -> tuple[Mismatch, 
 
 
 def _amount_body(amount: str) -> str:
-    """'1250.00' -> 1[.'\\s]?250\\.00, because a printed amount may group its thousands."""
+    """'1250.00' -> 1[.']?250\\.00, because a printed amount may group its thousands."""
     whole, cents = amount.split(".")
     groups = [whole[max(0, end - 3) : end] for end in range(len(whole), 0, -3)][::-1]
     return THOUSANDS_SEPARATOR.join(groups) + r"\." + cents

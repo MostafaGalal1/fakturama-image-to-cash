@@ -4,7 +4,7 @@ import pytest
 
 from image_to_cash.model import PaidStatus
 from image_to_cash.ocr import Box, TextBox
-from image_to_cash.reconcile import Mismatch, critical_fields, reconcile
+from image_to_cash.reconcile import Mismatch, critical_fields, fold, reconcile, value_pattern
 
 
 def text_boxes(texts):
@@ -22,6 +22,11 @@ def flagged(order, texts):
 def without_one(texts, value):
     index = texts.index(value)
     return texts[:index] + texts[index + 1 :]
+
+
+def inserted_after(texts, anchor, *new):
+    index = texts.index(anchor) + 1
+    return texts[:index] + new + texts[index:]
 
 
 def replaced(texts, old, new):
@@ -100,12 +105,27 @@ def test_values_inside_a_merged_table_row_are_found(sample_order):
 
 
 @pytest.mark.parametrize(
-    "printed", ["1.250,00", "1,250.00", "1 250,00", "1250.00", "EUR 1.250,00", "1.250,00 €"]
+    "printed", ["1.250,00", "1,250.00", "1'250.00", "1250.00", "EUR 1.250,00", "1.250,00 €"]
 )
 def test_thousands_separators_are_tolerated(sample_order, printed):
     totals = sample_order.totals.model_copy(update={"gross": Decimal("1250.00")})
     order = sample_order.model_copy(update={"totals": totals})
     assert "totals.gross" not in flagged(order, (printed,))
+
+
+def test_quantity_beside_a_price_is_not_a_thousands_group(sample_order):
+    order = with_item(sample_order, 0, unit_net_price=Decimal("2250.00"))
+    assert "items[0].unit_net_price" in flagged(order, ("2 250.00",))
+
+
+@pytest.mark.parametrize(("expected", "printed"), [("10117", "10117Berlin"), ("570.00", "EUR570.00")])
+def test_numbers_may_touch_letters(expected, printed):
+    assert value_pattern(expected).search(fold(printed))
+
+
+@pytest.mark.parametrize("printed", ["FOIL", "OILX"])
+def test_lookalike_only_words_keep_letter_boundaries(printed):
+    assert not value_pattern("OIL").search(fold(printed))
 
 
 @pytest.mark.parametrize("printed", ["10%", "1.0%", "100%"])
@@ -146,5 +166,6 @@ def test_zip_is_not_found_inside_the_phone_number(sample_order):
 
 def test_values_are_not_glued_across_boxes(sample_order):
     order = with_item(sample_order, 0, sku="CHR-ERGO-012")
-    texts = (*without_one(expected_texts(sample_order), "250.00"), "Qty 2", "50.00 EUR", "2")
+    texts = inserted_after(without_one(expected_texts(sample_order), "250.00"), "CHR-ERGO-01", "2")
+    texts = (*texts, "Qty 2", "50.00 EUR")
     assert flagged(order, texts) == ("items[0].sku", "items[0].unit_net_price")
