@@ -1346,8 +1346,9 @@ def test_missing_vision_framework_is_an_ocr_error(monkeypatch):
         ((0.1, 0.9, 0.5, 0.1), Box(20, 0, 100, 10)),
         ((0.1, 0.0, 0.5, 0.1), Box(20, 90, 100, 10)),
         ((-0.125, 0.9375, 0.5, 0.125), Box(0, 0, 75, 6)),
+        ((0.75, -0.0625, 0.5, 0.125), Box(150, 94, 50, 6)),
     ],
-    ids=["whole-image", "top-strip", "bottom-strip", "clamped-to-image"],
+    ids=["whole-image", "top-strip", "bottom-strip", "clamped-top-left", "clamped-bottom-right"],
 )
 def test_vision_rect_becomes_top_left_pixel_box(rect, expected):
     from image_to_cash.ocr.macos_vision import vision_rect_to_box  # imports Vision: macOS only
@@ -1355,21 +1356,27 @@ def test_vision_rect_becomes_top_left_pixel_box(rect, expected):
     assert vision_rect_to_box(*rect, width=200, height=100) == expected
 
 
-def render(text: str) -> Image.Image:
+VISION_PADDING_PX = 10  # Vision's boxes sit a few pixels outside the drawn glyphs
+
+
+def render(text: str, origin: tuple[int, int]) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    """A 1000x200 white image with `text` drawn at `origin`, plus the text's true bounding box."""
     image = Image.new("RGB", (1000, 200), "white")
-    ImageDraw.Draw(image).text((20, 20), text, fill="black", font=ImageFont.load_default(size=48))
-    return image
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=48)
+    draw.text(origin, text, fill="black", font=font)
+    return image, draw.textbbox(origin, text, font=font)
 
 
 @pytest.mark.macos
-def test_macos_vision_reads_rendered_text_with_top_left_boxes():
-    boxes = build_ocr("macos-vision").recognize(render("WEB-2026-0714-A17"))
-    joined = "".join(box.text for box in boxes).replace(" ", "")
-    assert "WEB-2026-0714-A17" in joined
-    first = boxes[0].box
-    assert 0 <= first.x < 1000
-    assert first.y < 80, "box must use a top-left origin (text was drawn near the top)"
-    assert first.width > 0 and first.height > 0
+@pytest.mark.parametrize("origin", [(20, 20), (500, 120)], ids=["top-left", "bottom-right"])
+def test_macos_vision_box_matches_drawn_text(origin):
+    image, truth = render("WEB-2026-0714-A17", origin)
+    boxes = build_ocr("macos-vision").recognize(image)
+    assert [box.text for box in boxes] == ["WEB-2026-0714-A17"]
+    box = boxes[0].box
+    edges = (box.x, box.y, box.x + box.width, box.y + box.height)
+    assert all(abs(edge - true) <= VISION_PADDING_PX for edge, true in zip(edges, truth)), (edges, truth)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1508,7 +1515,7 @@ __all__ = ["ENGINES", "Box", "OcrEngine", "OcrError", "TextBox", "build_ocr"]
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_ocr.py -q`
-Expected: `8 passed` on macOS.
+Expected: `10 passed` on macOS.
 
 - [ ] **Step 7: Commit**
 
@@ -1716,7 +1723,7 @@ def order_image(tmp_path) -> Path:
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -q`
-Expected: all passed (`94 passed` on macOS)
+Expected: all passed (`96 passed` on macOS)
 
 - [ ] **Step 6: Commit**
 
