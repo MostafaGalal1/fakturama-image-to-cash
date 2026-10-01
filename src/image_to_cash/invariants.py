@@ -11,7 +11,7 @@ from image_to_cash.model import LineItem, Order, PaidStatus
 CENT = Decimal("0.01")
 HUNDRED = Decimal("100")
 SUPPORTED_CURRENCY = "EUR"
-EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 @dataclass(frozen=True)
@@ -21,12 +21,14 @@ class Issue:
 
 
 def money(value: Decimal) -> Decimal:
+    """Round a Decimal to cents, half-up (never the context's default banker's rounding)."""
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
 def expected_line_net(
     quantity: Decimal, unit_net_price: Decimal, discount_percent: Decimal
 ) -> Decimal:
+    """qty × unit × (1 − discount/100), rounded once at the end (no rounding of the unit price)."""
     return money(quantity * unit_net_price * (1 - discount_percent / HUNDRED))
 
 
@@ -51,23 +53,38 @@ def _check_line(index: int, item: LineItem) -> Issue | None:
         return None
     return Issue(
         "line_net_mismatch",
-        f"line {index} ({item.sku}): expected {expected}, printed {item.line_net_total}",
+        f"line {index} ({item.sku}): {item.quantity} × {item.unit_net_price:.2f} "
+        f"− {item.discount_percent}% is {expected:.2f}, printed {money(item.line_net_total):.2f}",
     )
+
+
+def _sum_line_nets(order: Order) -> Decimal:
+    return money(sum((item.line_net_total for item in order.items), Decimal(0)))
+
+
+def _expected_vat(order: Order) -> Decimal:
+    """Convention: Σ(printed line net × VAT%) over all lines, rounded once at the end.
+
+    A document that rounds VAT per line can differ by a cent; it goes to review, never silently through.
+    """
+    raw = sum((item.line_net_total * item.vat_percent / HUNDRED for item in order.items), Decimal(0))
+    return money(raw)
 
 
 def _total_issues(order: Order) -> tuple[Issue, ...]:
-    net = money(sum((item.line_net_total for item in order.items), Decimal(0)))
-    vat = money(
-        sum((item.line_net_total * item.vat_percent / HUNDRED for item in order.items), Decimal(0))
-    )
     checks = (
-        ("net_total_mismatch", net, order.totals.net),
-        ("vat_total_mismatch", vat, order.totals.vat),
-        ("gross_total_mismatch", money(order.totals.net + order.totals.vat), order.totals.gross),
+        ("net_total_mismatch", "net total: printed line nets sum to", _sum_line_nets(order), order.totals.net),
+        ("vat_total_mismatch", "VAT total: Σ(line net × VAT%) is", _expected_vat(order), order.totals.vat),
+        (
+            "gross_total_mismatch",
+            "gross total: printed net + VAT is",
+            money(order.totals.net + order.totals.vat),
+            order.totals.gross,
+        ),
     )
     return tuple(
-        Issue(code, f"expected {expected}, printed {printed}")
-        for code, expected, printed in checks
+        Issue(code, f"{label} {expected:.2f}, printed total is {money(printed):.2f}")
+        for code, label, expected, printed in checks
         if expected != money(printed)
     )
 
@@ -91,6 +108,6 @@ def _currency_issues(order: Order) -> tuple[Issue, ...]:
 
 
 def _contact_issues(order: Order) -> tuple[Issue, ...]:
-    if EMAIL_PATTERN.match(order.customer.email):
+    if EMAIL_PATTERN.fullmatch(order.customer.email):
         return ()
     return (Issue("invalid_email", f"not an email address: {order.customer.email}"),)

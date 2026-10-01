@@ -558,6 +558,48 @@ def test_unsupported_currency_is_reported(sample_order):
 def test_invalid_email_is_reported(sample_order):
     customer = sample_order.customer.model_copy(update={"email": "marta.klein"})
     assert codes(sample_order.model_copy(update={"customer": customer})) == {"invalid_email"}
+
+
+def test_mixed_vat_rates_are_applied_per_line(sample_order):
+    first, second = sample_order.items
+    items = (first, second.model_copy(update={"vat_percent": Decimal("7")}))
+    totals = sample_order.totals.model_copy(
+        update={"vat": Decimal("93.90"), "gross": Decimal("663.90")}
+    )
+    order = sample_order.model_copy(update={"items": items, "totals": totals})
+    assert check_invariants(order) == ()
+
+
+def test_vat_is_rounded_once_on_the_sum(sample_order):
+    # 2 lines of 0.50 at 19%: rounding per line gives 0.10 + 0.10 = 0.20; the convention gives 0.19.
+    line = sample_order.items[1].model_copy(
+        update={"quantity": Decimal("1"), "unit_net_price": Decimal("0.50"), "line_net_total": Decimal("0.50")}
+    )
+    totals = sample_order.totals.model_copy(
+        update={"net": Decimal("1.00"), "vat": Decimal("0.19"), "gross": Decimal("1.19")}
+    )
+    clean = sample_order.model_copy(update={"items": (line, line), "totals": totals})
+    assert check_invariants(clean) == ()
+    per_line = totals.model_copy(update={"vat": Decimal("0.20"), "gross": Decimal("1.20")})
+    assert codes(clean.model_copy(update={"totals": per_line})) == {"vat_total_mismatch"}
+
+
+def test_one_cent_line_difference_names_line_and_sku(sample_order):
+    first, *rest = sample_order.items
+    off_by_cent = first.model_copy(update={"line_net_total": Decimal("450.01")})
+    order = sample_order.model_copy(update={"items": (off_by_cent, *rest)})
+    line_issues = [i for i in check_invariants(order) if i.code == "line_net_mismatch"]
+    assert len(line_issues) == 1
+    assert line_issues[0].message.startswith("line 1 (CHR-ERGO-01):")
+
+
+def test_total_messages_name_what_they_compare(sample_order):
+    totals = sample_order.totals.model_copy(update={"net": Decimal("571")})
+    order = sample_order.model_copy(update={"totals": totals})
+    messages = {issue.code: issue.message for issue in check_invariants(order)}
+    assert messages["net_total_mismatch"] == (
+        "net total: printed line nets sum to 570.00, printed total is 571.00"
+    )
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -581,7 +623,7 @@ from image_to_cash.model import LineItem, Order, PaidStatus
 CENT = Decimal("0.01")
 HUNDRED = Decimal("100")
 SUPPORTED_CURRENCY = "EUR"
-EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 @dataclass(frozen=True)
@@ -591,12 +633,14 @@ class Issue:
 
 
 def money(value: Decimal) -> Decimal:
+    """Round a Decimal to cents, half-up (never the context's default banker's rounding)."""
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
 def expected_line_net(
     quantity: Decimal, unit_net_price: Decimal, discount_percent: Decimal
 ) -> Decimal:
+    """qty × unit × (1 − discount/100), rounded once at the end (no rounding of the unit price)."""
     return money(quantity * unit_net_price * (1 - discount_percent / HUNDRED))
 
 
@@ -621,23 +665,38 @@ def _check_line(index: int, item: LineItem) -> Issue | None:
         return None
     return Issue(
         "line_net_mismatch",
-        f"line {index} ({item.sku}): expected {expected}, printed {item.line_net_total}",
+        f"line {index} ({item.sku}): {item.quantity} × {item.unit_net_price:.2f} "
+        f"− {item.discount_percent}% is {expected:.2f}, printed {money(item.line_net_total):.2f}",
     )
+
+
+def _sum_line_nets(order: Order) -> Decimal:
+    return money(sum((item.line_net_total for item in order.items), Decimal(0)))
+
+
+def _expected_vat(order: Order) -> Decimal:
+    """Convention: Σ(printed line net × VAT%) over all lines, rounded once at the end.
+
+    A document that rounds VAT per line can differ by a cent; it goes to review, never silently through.
+    """
+    raw = sum((item.line_net_total * item.vat_percent / HUNDRED for item in order.items), Decimal(0))
+    return money(raw)
 
 
 def _total_issues(order: Order) -> tuple[Issue, ...]:
-    net = money(sum((item.line_net_total for item in order.items), Decimal(0)))
-    vat = money(
-        sum((item.line_net_total * item.vat_percent / HUNDRED for item in order.items), Decimal(0))
-    )
     checks = (
-        ("net_total_mismatch", net, order.totals.net),
-        ("vat_total_mismatch", vat, order.totals.vat),
-        ("gross_total_mismatch", money(order.totals.net + order.totals.vat), order.totals.gross),
+        ("net_total_mismatch", "net total: printed line nets sum to", _sum_line_nets(order), order.totals.net),
+        ("vat_total_mismatch", "VAT total: Σ(line net × VAT%) is", _expected_vat(order), order.totals.vat),
+        (
+            "gross_total_mismatch",
+            "gross total: printed net + VAT is",
+            money(order.totals.net + order.totals.vat),
+            order.totals.gross,
+        ),
     )
     return tuple(
-        Issue(code, f"expected {expected}, printed {printed}")
-        for code, expected, printed in checks
+        Issue(code, f"{label} {expected:.2f}, printed total is {money(printed):.2f}")
+        for code, label, expected, printed in checks
         if expected != money(printed)
     )
 
@@ -661,7 +720,7 @@ def _currency_issues(order: Order) -> tuple[Issue, ...]:
 
 
 def _contact_issues(order: Order) -> tuple[Issue, ...]:
-    if EMAIL_PATTERN.match(order.customer.email):
+    if EMAIL_PATTERN.fullmatch(order.customer.email):
         return ()
     return (Issue("invalid_email", f"not an email address: {order.customer.email}"),)
 ```
@@ -669,7 +728,7 @@ def _contact_issues(order: Order) -> tuple[Issue, ...]:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_invariants.py -q`
-Expected: `12 passed`
+Expected: `16 passed`
 
 - [ ] **Step 5: Commit**
 
@@ -1357,7 +1416,7 @@ def order_image(tmp_path) -> Path:
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -q`
-Expected: all passed (`52 passed` on macOS)
+Expected: all passed (`56 passed` on macOS)
 
 - [ ] **Step 6: Commit**
 
