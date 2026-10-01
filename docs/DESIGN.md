@@ -49,7 +49,7 @@ order.png
 
 ## 4. Image-extraction strategy
 
-1. **Preprocess.** Upscale 3× (Lanczos). The LLM gets the colour image; OCR gets a grayscale, sharpened copy.
+1. **Preprocess.** Apply EXIF rotation, flatten transparency onto white, then upscale 3× (Lanczos, long edge capped at 4000 px). The LLM gets the colour image; OCR gets a grayscale, sharpened copy.
 2. **LLM read.** One call at temperature 0, using the configured provider's structured-output feature (tool calling for Claude, response schema for Gemini) with the `Order` model as the schema. The prompt says to **transcribe exactly what is printed**, never compute or correct, and to return `null` for anything absent. Each critical field carries both its raw string and its parsed value.
 3. **Independent OCR read** of the whole image produces word tokens with boxes.
 4. **Reconcile critical fields**, each of which must also appear in the OCR tokens after normalising look-alikes (O/0, I/1, spacing): external reference, dates, SKUs, unit prices, discounts, VAT %, line and order totals, streets, ZIP codes, phone and paid status. Quantities are checked indirectly, because a wrong quantity breaks the line-total invariant. On a mismatch, the LLM gets one retry on a zoomed crop around that field's OCR location. If it still disagrees, the run goes to manual review. **The bot never guesses.**
