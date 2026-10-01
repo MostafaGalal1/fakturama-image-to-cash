@@ -10,6 +10,9 @@ These fields are **not legible** at that resolution. The values below are best r
 - `customer.phone` (+49 30 3550 1420)
 - `items[*].unit` (PCS)
 
-Everything else, including all amounts, percentages, dates, the reference and the totals, reads clearly.
-The real pipeline's OCR cross-check covers the SKU, both streets and the phone, and is expected
-to flag them for review. `unit` is not cross-checked, because it is never entered into Fakturama.
+To a person, everything else (all amounts, percentages, dates, the reference and the totals)
+reads clearly. macOS Vision OCR does much worse at this size: on this image the cross-check
+confirms only the payment status and the three order totals, and flags the other 18 critical
+fields (measured 2026-10-02). A run on this image therefore always goes to review, and
+`approve` is the way through. `unit` is not cross-checked, because it is never entered into
+Fakturama.

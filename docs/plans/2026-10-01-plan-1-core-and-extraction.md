@@ -250,9 +250,12 @@ These fields are **not legible** at that resolution. The values below are best r
 - `customer.phone` (+49 30 3550 1420)
 - `items[*].unit` (PCS)
 
-Everything else, including all amounts, percentages, dates, the reference and the totals, reads clearly.
-The real pipeline's OCR cross-check covers the SKU, both streets and the phone, and is expected
-to flag them for review. `unit` is not cross-checked, because it is never entered into Fakturama.
+To a person, everything else (all amounts, percentages, dates, the reference and the totals)
+reads clearly. macOS Vision OCR does much worse at this size: on this image the cross-check
+confirms only the payment status and the three order totals, and flags the other 18 critical
+fields (measured 2026-10-02). A run on this image therefore always goes to review, and
+`approve` is the way through. `unit` is not cross-checked, because it is never entered into
+Fakturama.
 ```
 
 - [ ] **Step 2: Replace `tests/conftest.py` with the shared fixtures**
@@ -1536,6 +1539,11 @@ git commit -m "feat: add OCR interface with macOS Vision adapter"
 
 `tests/test_reconcile.py`:
 ```python
+from decimal import Decimal
+
+import pytest
+
+from image_to_cash.model import PaidStatus
 from image_to_cash.ocr import Box, TextBox
 from image_to_cash.reconcile import Mismatch, critical_fields, reconcile
 
@@ -1546,6 +1554,31 @@ def text_boxes(texts):
 
 def expected_texts(order):
     return tuple(expected for _, expected in critical_fields(order))
+
+
+def flagged(order, texts):
+    return tuple(mismatch.field for mismatch in reconcile(order, text_boxes(texts)))
+
+
+def without_one(texts, value):
+    index = texts.index(value)
+    return texts[:index] + texts[index + 1 :]
+
+
+def replaced(texts, old, new):
+    return tuple(new if text == old else text for text in texts)
+
+
+def with_item(order, index, **changes):
+    items = tuple(
+        item.model_copy(update=changes) if position == index else item
+        for position, item in enumerate(order.items)
+    )
+    return order.model_copy(update={"items": items})
+
+
+def with_billing(order, **changes):
+    return order.model_copy(update={"billing_address": order.billing_address.model_copy(update=changes)})
 
 
 def test_critical_fields_use_printed_formats(sample_order):
@@ -1559,8 +1592,19 @@ def test_critical_fields_use_printed_formats(sample_order):
     assert fields["customer.phone"] == "+49 30 3550 1420"
 
 
+def test_unpaid_order_has_no_payment_date_field(sample_order):
+    payment = sample_order.payment.model_copy(update={"status": PaidStatus.UNPAID, "payment_date": None})
+    fields = dict(critical_fields(sample_order.model_copy(update={"payment": payment})))
+    assert fields["payment.status"] == "UNPAID"
+    assert "payment.payment_date" not in fields
+
+
 def test_no_mismatch_when_ocr_sees_everything(sample_order):
     assert reconcile(sample_order, text_boxes(expected_texts(sample_order))) == ()
+
+
+def test_empty_ocr_flags_every_field(sample_order):
+    assert len(reconcile(sample_order, ())) == len(critical_fields(sample_order))
 
 
 def test_missing_sku_is_reported(sample_order):
@@ -1568,14 +1612,83 @@ def test_missing_sku_is_reported(sample_order):
     assert reconcile(sample_order, text_boxes(texts)) == (Mismatch("items[1].sku", "MAT-DESK-02"),)
 
 
+def test_wrong_digit_is_reported(sample_order):
+    texts = replaced(expected_texts(sample_order), "450.00", "460.00")
+    assert flagged(sample_order, texts) == ("items[0].line_net_total",)
+
+
 def test_lookalike_characters_are_tolerated(sample_order):
-    texts = tuple(t.replace("0", "O") for t in expected_texts(sample_order))
+    texts = tuple(t.replace("0", "O").replace("1", "l") for t in expected_texts(sample_order))
     assert reconcile(sample_order, text_boxes(texts)) == ()
 
 
 def test_spacing_and_decimal_commas_are_tolerated(sample_order):
     texts = tuple(t.replace(".", ",").replace("-", " - ") for t in expected_texts(sample_order))
     assert reconcile(sample_order, text_boxes(texts)) == ()
+
+
+def test_accents_and_dashes_are_tolerated(sample_order):
+    texts = replaced(expected_texts(sample_order), "Huttenstrasse 41", "Hüttenstraße 41")
+    texts = replaced(texts, "WEB-2026-0714-A17", "WEB–2026–0714–A17")
+    assert flagged(sample_order, texts) == ()
+
+
+def test_values_inside_a_merged_table_row_are_found(sample_order):
+    row = "1 CHR-ERGO-01 Ergonomic Desk Chair 2 PCS 250.00 10% 19% 450.00"
+    merged = {"CHR-ERGO-01", "250.00", "10%", "450.00"}
+    rest = tuple(t for t in expected_texts(sample_order) if t not in merged)
+    assert flagged(sample_order, (*rest, row)) == ()
+
+
+@pytest.mark.parametrize(
+    "printed", ["1.250,00", "1,250.00", "1 250,00", "1250.00", "EUR 1.250,00", "1.250,00 €"]
+)
+def test_thousands_separators_are_tolerated(sample_order, printed):
+    totals = sample_order.totals.model_copy(update={"gross": Decimal("1250.00")})
+    order = sample_order.model_copy(update={"totals": totals})
+    assert "totals.gross" not in flagged(order, (printed,))
+
+
+@pytest.mark.parametrize("printed", ["10%", "1.0%", "100%"])
+def test_zero_discount_is_not_vouched_for_by_a_longer_percent(sample_order, printed):
+    texts = replaced(expected_texts(sample_order), "0%", printed)
+    assert flagged(sample_order, texts) == ("items[1].discount_percent",)
+
+
+def test_each_field_needs_its_own_occurrence(sample_order):
+    texts = without_one(expected_texts(sample_order), "19%")
+    assert flagged(sample_order, texts) == ("items[1].vat_percent",)
+
+
+def test_paid_is_not_vouched_for_by_unpaid(sample_order):
+    texts = replaced(expected_texts(sample_order), "PAID", "UNPAID")
+    assert flagged(sample_order, texts) == ("payment.status",)
+
+
+def test_amount_is_not_the_tail_of_a_longer_number(sample_order):
+    texts = replaced(expected_texts(sample_order), "120.00", "1120.00")
+    assert flagged(sample_order, texts) == ("items[1].line_net_total",)
+
+
+def test_truncated_values_are_reported(sample_order):
+    order = with_item(sample_order, 0, sku="CHR-ERGO-0", unit_net_price=Decimal("50.00"))
+    assert flagged(order, expected_texts(sample_order)) == ("items[0].sku", "items[0].unit_net_price")
+
+
+def test_house_number_must_match_in_full(sample_order):
+    order = with_billing(sample_order, street="Friedrichstrasse 8")
+    assert flagged(order, expected_texts(sample_order)) == ("billing_address.street",)
+
+
+def test_zip_is_not_found_inside_the_phone_number(sample_order):
+    order = with_billing(sample_order, zip="30355")
+    assert flagged(order, expected_texts(sample_order)) == ("billing_address.zip",)
+
+
+def test_values_are_not_glued_across_boxes(sample_order):
+    order = with_item(sample_order, 0, sku="CHR-ERGO-012")
+    texts = (*without_one(expected_texts(sample_order), "250.00"), "Qty 2", "50.00 EUR", "2")
+    assert flagged(order, texts) == ("items[0].sku", "items[0].unit_net_price")
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1586,17 +1699,34 @@ Expected: `ModuleNotFoundError: No module named 'image_to_cash.reconcile'`
 - [ ] **Step 3: Implement `src/image_to_cash/reconcile.py`**
 
 ```python
-"""Cross-check critical reader fields against an independent OCR read (design §4, step 4)."""
+"""Cross-check critical reader fields against an independent OCR read (design §4, step 4).
+
+A field counts as confirmed only when its printed form appears inside one OCR box, as whole
+tokens, and the page shows it at least as many times as there are fields claiming it. A
+match never spans two boxes, so neighbouring boxes cannot be glued into a value.
+
+Limits: the check ignores where a value sits, so two fields that swapped values (say billing
+and delivery ZIP) both pass; catching that needs box geometry. A thousands group printed with
+a space ("1 250.00") still contains "250.00" as whole tokens.
+"""
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 
 from image_to_cash.model import Order
 from image_to_cash.ocr.base import TextBox
 
+# Folded on both sides: OCR confuses these, and "," -> "." also unifies decimal commas.
 LOOKALIKES = str.maketrans({"O": "0", "I": "1", "L": "1", ",": "."})
+DASHES = str.maketrans(dict.fromkeys("‐‑‒–—−", "-"))
+AMOUNT = re.compile(r"\d+\.\d\d")
+THOUSANDS_SEPARATOR = r"[.'\s]?"
+# Alphanumeric runs stay intact; OCR may add or drop spaces between runs and punctuation.
+TOKEN_PIECE = re.compile(r"[^\W_]+|\S")
 
 
 @dataclass(frozen=True)
@@ -1605,8 +1735,21 @@ class Mismatch:
     expected: str
 
 
-def normalize_token(text: str) -> str:
-    return "".join(text.upper().split()).translate(LOOKALIKES)
+def fold(text: str) -> str:
+    """Uppercase, drop accents, unify dashes and lookalikes, collapse whitespace to one space."""
+    decomposed = unicodedata.normalize("NFKD", text.upper())
+    bare = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return " ".join(bare.translate(DASHES).translate(LOOKALIKES).split())
+
+
+def value_pattern(expected: str) -> re.Pattern[str]:
+    """Matches the printed value as whole tokens inside one folded OCR line."""
+    folded = fold(expected)
+    body = _amount_body(folded) if AMOUNT.fullmatch(folded) else _text_body(folded)
+    edge = r"\w" if any(char.isalpha() for char in expected) else "[0-9]"
+    head = f"(?<!{edge})" + (r"(?<![0-9][.])" if folded[0].isdigit() else "")
+    tail = f"(?!{edge})" if folded[-1].isalnum() else ""
+    return re.compile(head + body + tail)
 
 
 def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
@@ -1640,12 +1783,34 @@ def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
 
 
 def reconcile(order: Order, text_boxes: tuple[TextBox, ...]) -> tuple[Mismatch, ...]:
-    haystack = normalize_token("".join(box.text for box in text_boxes))
+    lines = tuple(fold(box.text) for box in text_boxes)
+    fields = critical_fields(order)
+    patterns = tuple(value_pattern(expected) for _, expected in fields)
     return tuple(
         Mismatch(field, expected)
-        for field, expected in critical_fields(order)
-        if normalize_token(expected) not in haystack
+        for index, (field, expected) in enumerate(fields)
+        if _claim_rank(patterns, index) > _occurrences(patterns[index], lines)
     )
+
+
+def _amount_body(amount: str) -> str:
+    """'1250.00' -> 1[.'\\s]?250\\.00, because a printed amount may group its thousands."""
+    whole, cents = amount.split(".")
+    groups = [whole[max(0, end - 3) : end] for end in range(len(whole), 0, -3)][::-1]
+    return THOUSANDS_SEPARATOR.join(groups) + r"\." + cents
+
+
+def _text_body(value: str) -> str:
+    return r"\s*".join(re.escape(piece) for piece in TOKEN_PIECE.findall(value))
+
+
+def _claim_rank(patterns: tuple[re.Pattern[str], ...], index: int) -> int:
+    """1 for the first field claiming this value, 2 for the second, and so on."""
+    return sum(1 for pattern in patterns[: index + 1] if pattern.pattern == patterns[index].pattern)
+
+
+def _occurrences(pattern: re.Pattern[str], lines: tuple[str, ...]) -> int:
+    return sum(len(pattern.findall(line)) for line in lines)
 
 
 def _amount(value: Decimal) -> str:
@@ -1723,7 +1888,7 @@ def order_image(tmp_path) -> Path:
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -q`
-Expected: all passed (`96 passed` on macOS)
+Expected: all passed (`117 passed` on macOS)
 
 - [ ] **Step 6: Commit**
 

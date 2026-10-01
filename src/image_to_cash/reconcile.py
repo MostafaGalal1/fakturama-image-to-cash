@@ -1,14 +1,31 @@
-"""Cross-check critical reader fields against an independent OCR read (design §4, step 4)."""
+"""Cross-check critical reader fields against an independent OCR read (design §4, step 4).
+
+A field counts as confirmed only when its printed form appears inside one OCR box, as whole
+tokens, and the page shows it at least as many times as there are fields claiming it. A
+match never spans two boxes, so neighbouring boxes cannot be glued into a value.
+
+Limits: the check ignores where a value sits, so two fields that swapped values (say billing
+and delivery ZIP) both pass; catching that needs box geometry. A thousands group printed with
+a space ("1 250.00") still contains "250.00" as whole tokens.
+"""
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 
 from image_to_cash.model import Order
 from image_to_cash.ocr.base import TextBox
 
+# Folded on both sides: OCR confuses these, and "," -> "." also unifies decimal commas.
 LOOKALIKES = str.maketrans({"O": "0", "I": "1", "L": "1", ",": "."})
+DASHES = str.maketrans(dict.fromkeys("‐‑‒–—−", "-"))
+AMOUNT = re.compile(r"\d+\.\d\d")
+THOUSANDS_SEPARATOR = r"[.'\s]?"
+# Alphanumeric runs stay intact; OCR may add or drop spaces between runs and punctuation.
+TOKEN_PIECE = re.compile(r"[^\W_]+|\S")
 
 
 @dataclass(frozen=True)
@@ -17,8 +34,21 @@ class Mismatch:
     expected: str
 
 
-def normalize_token(text: str) -> str:
-    return "".join(text.upper().split()).translate(LOOKALIKES)
+def fold(text: str) -> str:
+    """Uppercase, drop accents, unify dashes and lookalikes, collapse whitespace to one space."""
+    decomposed = unicodedata.normalize("NFKD", text.upper())
+    bare = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return " ".join(bare.translate(DASHES).translate(LOOKALIKES).split())
+
+
+def value_pattern(expected: str) -> re.Pattern[str]:
+    """Matches the printed value as whole tokens inside one folded OCR line."""
+    folded = fold(expected)
+    body = _amount_body(folded) if AMOUNT.fullmatch(folded) else _text_body(folded)
+    edge = r"\w" if any(char.isalpha() for char in expected) else "[0-9]"
+    head = f"(?<!{edge})" + (r"(?<![0-9][.])" if folded[0].isdigit() else "")
+    tail = f"(?!{edge})" if folded[-1].isalnum() else ""
+    return re.compile(head + body + tail)
 
 
 def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
@@ -52,12 +82,34 @@ def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
 
 
 def reconcile(order: Order, text_boxes: tuple[TextBox, ...]) -> tuple[Mismatch, ...]:
-    haystack = normalize_token("".join(box.text for box in text_boxes))
+    lines = tuple(fold(box.text) for box in text_boxes)
+    fields = critical_fields(order)
+    patterns = tuple(value_pattern(expected) for _, expected in fields)
     return tuple(
         Mismatch(field, expected)
-        for field, expected in critical_fields(order)
-        if normalize_token(expected) not in haystack
+        for index, (field, expected) in enumerate(fields)
+        if _claim_rank(patterns, index) > _occurrences(patterns[index], lines)
     )
+
+
+def _amount_body(amount: str) -> str:
+    """'1250.00' -> 1[.'\\s]?250\\.00, because a printed amount may group its thousands."""
+    whole, cents = amount.split(".")
+    groups = [whole[max(0, end - 3) : end] for end in range(len(whole), 0, -3)][::-1]
+    return THOUSANDS_SEPARATOR.join(groups) + r"\." + cents
+
+
+def _text_body(value: str) -> str:
+    return r"\s*".join(re.escape(piece) for piece in TOKEN_PIECE.findall(value))
+
+
+def _claim_rank(patterns: tuple[re.Pattern[str], ...], index: int) -> int:
+    """1 for the first field claiming this value, 2 for the second, and so on."""
+    return sum(1 for pattern in patterns[: index + 1] if pattern.pattern == patterns[index].pattern)
+
+
+def _occurrences(pattern: re.Pattern[str], lines: tuple[str, ...]) -> int:
+    return sum(len(pattern.findall(line)) for line in lines)
 
 
 def _amount(value: Decimal) -> str:
