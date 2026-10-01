@@ -1696,13 +1696,19 @@ git commit -m "feat: cross-check critical order fields against OCR text"
 `tests/test_readers.py`:
 ```python
 import pytest
+from PIL import Image
 
 from image_to_cash.readers import ReaderError, build_reader
 
 
-def test_fixture_reader_replays_recorded_order(sample_order_path, order_image, sample_order):
+@pytest.fixture
+def prepared_image() -> Image.Image:
+    return Image.new("RGB", (40, 60), "white")
+
+
+def test_fixture_reader_replays_recorded_order(sample_order_path, prepared_image, sample_order):
     reader = build_reader("fixture", fixture=sample_order_path)
-    assert reader.read(order_image) == sample_order
+    assert reader.read(prepared_image) == sample_order
 
 
 def test_fixture_reader_requires_a_path():
@@ -1715,17 +1721,17 @@ def test_unknown_reader_is_rejected():
         build_reader("nope")
 
 
-def test_missing_fixture_raises_reader_error(tmp_path, order_image):
+def test_missing_fixture_raises_reader_error(tmp_path, prepared_image):
     reader = build_reader("fixture", fixture=tmp_path / "missing.json")
     with pytest.raises(ReaderError):
-        reader.read(order_image)
+        reader.read(prepared_image)
 
 
-def test_invalid_fixture_raises_reader_error(tmp_path, order_image):
+def test_invalid_fixture_raises_reader_error(tmp_path, prepared_image):
     bad = tmp_path / "bad.json"
     bad.write_text('{"external_reference": "X"}', encoding="utf-8")
     with pytest.raises(ReaderError):
-        build_reader("fixture", fixture=bad).read(order_image)
+        build_reader("fixture", fixture=bad).read(prepared_image)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1740,8 +1746,9 @@ Expected: `ModuleNotFoundError: No module named 'image_to_cash.readers'`
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Protocol
+
+from PIL import Image
 
 from image_to_cash.model import Order
 
@@ -1751,7 +1758,9 @@ class ReaderError(RuntimeError):
 
 
 class ImageReader(Protocol):
-    def read(self, image_path: Path) -> Order: ...
+    def read(self, image: Image.Image) -> Order:
+        """Read an image already prepared by `imaging`: upright, RGB and upscaled."""
+        ...
 ```
 
 - [ ] **Step 4: Implement `src/image_to_cash/readers/fixture.py`**
@@ -1763,6 +1772,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PIL import Image
 from pydantic import ValidationError
 
 from image_to_cash.model import Order
@@ -1773,7 +1783,7 @@ class FixtureReader:
     def __init__(self, fixture_path: Path) -> None:
         self._fixture_path = fixture_path
 
-    def read(self, image_path: Path) -> Order:
+    def read(self, image: Image.Image) -> Order:
         try:
             return Order.model_validate_json(self._fixture_path.read_text(encoding="utf-8"))
         except (OSError, ValidationError) as error:
@@ -1912,8 +1922,9 @@ class ExtractionResult:
 
 
 def extract(image_path: Path, reader: ImageReader, ocr: OcrEngine) -> ExtractionResult:
-    order = reader.read(image_path)
-    text_boxes = ocr.recognize(for_ocr(upscale(load_image(image_path))))
+    prepared = upscale(load_image(image_path))
+    order = reader.read(prepared)
+    text_boxes = ocr.recognize(for_ocr(prepared))
     mismatches = reconcile(order, text_boxes)
     issues = check_invariants(order)
     try:
