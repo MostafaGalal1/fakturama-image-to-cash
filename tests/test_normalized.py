@@ -12,11 +12,27 @@ def test_split_contact_name():
     assert split_contact_name("Marta Klein") == ("Marta", "Klein")
 
 
-def test_split_contact_name_accepts_last_comma_first():
-    assert split_contact_name("Klein, Anna Maria") == ("Anna Maria", "Klein")
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [("Klein, Anna Maria", ("Anna Maria", "Klein")), ("von Klein, Marta", ("Marta", "von Klein"))],
+)
+def test_split_contact_name_accepts_last_comma_first(name, expected):
+    assert split_contact_name(name) == expected
 
 
-@pytest.mark.parametrize("name", ["Anna Maria Klein", "Dr. Klein", "Marta K.", "Klein,", "Marta"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Anna Maria Klein",
+        "Dr. Klein",
+        "Marta K.",
+        "Klein,",
+        "Marta",
+        "Marta Klein, Jr.",
+        "Dr. Klein, Marta",
+        "Klein, Dr. Marta",
+    ],
+)
 def test_split_contact_name_refuses_to_guess(name):
     with pytest.raises(NeedsReview) as excinfo:
         split_contact_name(name)
@@ -57,6 +73,20 @@ def test_normalize_sample(sample_order):
         ("CHR-ERGO-01", Decimal("2"), Decimal("10"), Decimal("450.00")),
         ("MAT-DESK-02", Decimal("3"), Decimal("0"), Decimal("120.00")),
     ]
+
+
+def test_normalize_accepts_largest_model_valid_price(sample_order):
+    item = sample_order.items[0].model_copy(
+        update={
+            "quantity": Decimal("1"),
+            "unit_net_price": Decimal("9999999999.99"),
+            "discount_percent": Decimal("0"),
+            "vat_percent": Decimal("100"),
+            "line_net_total": Decimal("9999999999.99"),
+        }
+    )
+    normalized = normalize(sample_order.model_copy(update={"items": (item,)}))
+    assert normalized.products[0].gross_price == Decimal("19999999999.98")
 
 
 def test_normalized_order_json_round_trip(sample_order):
@@ -107,8 +137,16 @@ def test_conflicting_sku_lines_need_review(sample_order, change):
         lambda d: d | {"lines": [d["lines"][0] | {"vat_percent": "7"}, d["lines"][1]]},
         lambda d: d | {"debtor": d["debtor"] | {"first_name": " "}},
         lambda d: d | {"products": [d["products"][0] | {"gross_price": "-1.00"}, d["products"][1]]},
+        lambda d: d | {"lines": [d["lines"][0]]},
     ],
-    ids=["line-sku-without-product", "duplicate-product", "line-vat-differs", "blank-name", "negative-gross"],
+    ids=[
+        "line-sku-without-product",
+        "duplicate-product",
+        "line-vat-differs",
+        "blank-name",
+        "negative-gross",
+        "product-without-line",
+    ],
 )
 def test_edited_order_json_is_validated(sample_order, edit):
     data = edit(normalize(sample_order).model_dump(mode="json"))

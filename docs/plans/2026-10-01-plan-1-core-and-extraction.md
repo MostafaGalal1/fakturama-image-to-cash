@@ -762,11 +762,27 @@ def test_split_contact_name():
     assert split_contact_name("Marta Klein") == ("Marta", "Klein")
 
 
-def test_split_contact_name_accepts_last_comma_first():
-    assert split_contact_name("Klein, Anna Maria") == ("Anna Maria", "Klein")
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [("Klein, Anna Maria", ("Anna Maria", "Klein")), ("von Klein, Marta", ("Marta", "von Klein"))],
+)
+def test_split_contact_name_accepts_last_comma_first(name, expected):
+    assert split_contact_name(name) == expected
 
 
-@pytest.mark.parametrize("name", ["Anna Maria Klein", "Dr. Klein", "Marta K.", "Klein,", "Marta"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Anna Maria Klein",
+        "Dr. Klein",
+        "Marta K.",
+        "Klein,",
+        "Marta",
+        "Marta Klein, Jr.",
+        "Dr. Klein, Marta",
+        "Klein, Dr. Marta",
+    ],
+)
 def test_split_contact_name_refuses_to_guess(name):
     with pytest.raises(NeedsReview) as excinfo:
         split_contact_name(name)
@@ -807,6 +823,20 @@ def test_normalize_sample(sample_order):
         ("CHR-ERGO-01", Decimal("2"), Decimal("10"), Decimal("450.00")),
         ("MAT-DESK-02", Decimal("3"), Decimal("0"), Decimal("120.00")),
     ]
+
+
+def test_normalize_accepts_largest_model_valid_price(sample_order):
+    item = sample_order.items[0].model_copy(
+        update={
+            "quantity": Decimal("1"),
+            "unit_net_price": Decimal("9999999999.99"),
+            "discount_percent": Decimal("0"),
+            "vat_percent": Decimal("100"),
+            "line_net_total": Decimal("9999999999.99"),
+        }
+    )
+    normalized = normalize(sample_order.model_copy(update={"items": (item,)}))
+    assert normalized.products[0].gross_price == Decimal("19999999999.98")
 
 
 def test_normalized_order_json_round_trip(sample_order):
@@ -857,8 +887,16 @@ def test_conflicting_sku_lines_need_review(sample_order, change):
         lambda d: d | {"lines": [d["lines"][0] | {"vat_percent": "7"}, d["lines"][1]]},
         lambda d: d | {"debtor": d["debtor"] | {"first_name": " "}},
         lambda d: d | {"products": [d["products"][0] | {"gross_price": "-1.00"}, d["products"][1]]},
+        lambda d: d | {"lines": [d["lines"][0]]},
     ],
-    ids=["line-sku-without-product", "duplicate-product", "line-vat-differs", "blank-name", "negative-gross"],
+    ids=[
+        "line-sku-without-product",
+        "duplicate-product",
+        "line-vat-differs",
+        "blank-name",
+        "negative-gross",
+        "product-without-line",
+    ],
 )
 def test_edited_order_json_is_validated(sample_order, edit):
     data = edit(normalize(sample_order).model_dump(mode="json"))
@@ -982,6 +1020,9 @@ class NormalizedOrder(Frozen):
         vat_by_sku = {product.sku: product.vat_percent for product in self.products}
         if len(vat_by_sku) != len(self.products):
             raise ValueError("product SKUs must be unique")
+        unused = vat_by_sku.keys() - {line.sku for line in self.lines}
+        if unused:
+            raise ValueError(f"products without a line: {', '.join(sorted(unused))}")
         for line in self.lines:
             if line.sku not in vat_by_sku:
                 raise ValueError(f"line SKU {line.sku} has no product")
@@ -991,15 +1032,20 @@ class NormalizedOrder(Frozen):
 
 
 def split_contact_name(full_name: str) -> tuple[str, str]:
-    """Accept 'First Last', or 'Last, First Names' (how a reviewer writes multi-word names)."""
+    """Accept 'First Last', or 'Last, First Names' (how a reviewer writes multi-word names).
+
+    Titles and initials (any token ending in '.') go to review in both forms. An undotted
+    suffix such as 'Marta Klein, MBA' cannot be told apart from a first name; that is the
+    accepted cost of the comma form.
+    """
     if "," in full_name:
         last, _, first = full_name.partition(",")
         last, first = last.strip(), first.strip()
-        if last and first and "," not in first:
+        if last and first and "," not in first and not _has_dotted_token(full_name):
             return first, last
         raise _ambiguous_name(full_name)
     parts = full_name.split()
-    if len(parts) == 2 and not any(part.endswith(".") for part in parts):
+    if len(parts) == 2 and not _has_dotted_token(full_name):
         return parts[0], parts[1]
     raise _ambiguous_name(full_name)
 
@@ -1030,6 +1076,10 @@ def normalize(order: Order) -> NormalizedOrder:
         payment=order.payment,
         totals=order.totals,
     )
+
+
+def _has_dotted_token(name: str) -> bool:
+    return any(token.endswith(".") for token in name.replace(",", " ").split())
 
 
 def _ambiguous_name(full_name: str) -> NeedsReview:
@@ -1068,7 +1118,7 @@ def _line(item: LineItem) -> OrderLine:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_normalized.py -q`
-Expected: `23 passed`
+Expected: `29 passed`
 
 - [ ] **Step 6: Commit**
 
@@ -1535,7 +1585,7 @@ def order_image(tmp_path) -> Path:
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -q`
-Expected: all passed (`71 passed` on macOS)
+Expected: all passed (`77 passed` on macOS)
 
 - [ ] **Step 6: Commit**
 

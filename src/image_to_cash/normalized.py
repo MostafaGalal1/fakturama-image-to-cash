@@ -85,6 +85,9 @@ class NormalizedOrder(Frozen):
         vat_by_sku = {product.sku: product.vat_percent for product in self.products}
         if len(vat_by_sku) != len(self.products):
             raise ValueError("product SKUs must be unique")
+        unused = vat_by_sku.keys() - {line.sku for line in self.lines}
+        if unused:
+            raise ValueError(f"products without a line: {', '.join(sorted(unused))}")
         for line in self.lines:
             if line.sku not in vat_by_sku:
                 raise ValueError(f"line SKU {line.sku} has no product")
@@ -94,15 +97,20 @@ class NormalizedOrder(Frozen):
 
 
 def split_contact_name(full_name: str) -> tuple[str, str]:
-    """Accept 'First Last', or 'Last, First Names' (how a reviewer writes multi-word names)."""
+    """Accept 'First Last', or 'Last, First Names' (how a reviewer writes multi-word names).
+
+    Titles and initials (any token ending in '.') go to review in both forms. An undotted
+    suffix such as 'Marta Klein, MBA' cannot be told apart from a first name; that is the
+    accepted cost of the comma form.
+    """
     if "," in full_name:
         last, _, first = full_name.partition(",")
         last, first = last.strip(), first.strip()
-        if last and first and "," not in first:
+        if last and first and "," not in first and not _has_dotted_token(full_name):
             return first, last
         raise _ambiguous_name(full_name)
     parts = full_name.split()
-    if len(parts) == 2 and not any(part.endswith(".") for part in parts):
+    if len(parts) == 2 and not _has_dotted_token(full_name):
         return parts[0], parts[1]
     raise _ambiguous_name(full_name)
 
@@ -133,6 +141,10 @@ def normalize(order: Order) -> NormalizedOrder:
         payment=order.payment,
         totals=order.totals,
     )
+
+
+def _has_dotted_token(name: str) -> bool:
+    return any(token.endswith(".") for token in name.replace(",", " ").split())
 
 
 def _ambiguous_name(full_name: str) -> NeedsReview:
