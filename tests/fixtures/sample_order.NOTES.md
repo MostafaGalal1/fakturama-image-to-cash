@@ -11,4 +11,5 @@ These fields are **not legible** at that resolution. The values below are best r
 - `items[*].unit` (PCS)
 
 Everything else, including all amounts, percentages, dates, the reference and the totals, reads clearly.
-The real pipeline's OCR cross-check is expected to flag the unverified fields for review.
+The real pipeline's OCR cross-check covers the SKU, both streets and the phone, and is expected
+to flag them for review. `unit` is not cross-checked, because it is never entered into Fakturama.

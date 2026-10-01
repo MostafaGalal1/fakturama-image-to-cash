@@ -251,7 +251,8 @@ These fields are **not legible** at that resolution. The values below are best r
 - `items[*].unit` (PCS)
 
 Everything else, including all amounts, percentages, dates, the reference and the totals, reads clearly.
-The real pipeline's OCR cross-check is expected to flag the unverified fields for review.
+The real pipeline's OCR cross-check covers the SKU, both streets and the phone, and is expected
+to flag them for review. `unit` is not cross-checked, because it is never entered into Fakturama.
 ```
 
 - [ ] **Step 2: Replace `tests/conftest.py` with the shared fixtures**
@@ -329,6 +330,48 @@ def test_unknown_payment_method_is_rejected(sample_order):
     data = data | {"payment": data["payment"] | {"method": "Cash"}}
     with pytest.raises(ValidationError):
         Order.model_validate(data)
+
+
+def test_json_round_trip_is_lossless(sample_order):
+    assert Order.model_validate_json(sample_order.model_dump_json()) == sample_order
+
+
+def test_padded_text_is_stripped(sample_order):
+    data = with_value(sample_order.model_dump(mode="json"), ("items", 0, "sku"), "  CHR-ERGO-01 ")
+    assert Order.model_validate(data).items[0].sku == "CHR-ERGO-01"
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("items", 0, "quantity"), "0"),
+        (("items", 0, "unit_net_price"), "-1.00"),
+        (("items", 0, "discount_percent"), "101"),
+        (("items", 0, "vat_percent"), "19.555"),
+        (("items", 0, "line_net_total"), "1E+30"),
+        (("items", 0, "sku"), "   "),
+        (("items", 0, "unit"), ""),
+        (("totals", "net"), "-570.00"),
+        (("totals", "gross"), "NaN"),
+        (("currency",), "eur"),
+        (("billing_address", "zip"), " "),
+        (("customer", "surprise"), "x"),
+    ],
+)
+def test_invalid_values_are_rejected_at_their_field(sample_order, path, value):
+    data = with_value(sample_order.model_dump(mode="json"), path, value)
+    with pytest.raises(ValidationError) as excinfo:
+        Order.model_validate(data)
+    assert excinfo.value.errors()[0]["loc"] == path
+
+
+def with_value(data, path, value):
+    """Return a copy of nested JSON-like `data` with `value` placed at `path`."""
+    head, *rest = path
+    new_child = value if not rest else with_value(data[head], rest, value)
+    if isinstance(data, list):
+        return [new_child if index == head else item for index, item in enumerate(data)]
+    return data | {head: new_child}
 ```
 
 - [ ] **Step 4: Run the tests to verify they fail**
@@ -346,8 +389,15 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Bounded types: a garbled reading (e.g. "1E+30") must fail validation, not crash the money maths.
+NonEmptyStr = Annotated[str, Field(min_length=1)]
+Amount = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2)]
+Quantity = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=4)]
+Percent = Annotated[Decimal, Field(ge=0, le=100, max_digits=5, decimal_places=2)]
 
 
 class PaymentMethod(StrEnum):
@@ -362,35 +412,35 @@ class PaidStatus(StrEnum):
 
 
 class Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
 
 
 class Address(Frozen):
-    name: str = Field(min_length=1)
-    street: str = Field(min_length=1)
-    zip: str = Field(min_length=1)
-    city: str = Field(min_length=1)
-    country: str = Field(min_length=1)
+    name: NonEmptyStr
+    street: NonEmptyStr
+    zip: NonEmptyStr
+    city: NonEmptyStr
+    country: NonEmptyStr
 
 
 class Customer(Frozen):
     customer_id: str | None = None
-    company: str = Field(min_length=1)
-    alias: str = Field(min_length=1)
-    contact_name: str = Field(min_length=1)
+    company: NonEmptyStr
+    alias: NonEmptyStr
+    contact_name: NonEmptyStr
     email: str = Field(min_length=3)
-    phone: str = Field(min_length=1)
+    phone: NonEmptyStr
 
 
 class LineItem(Frozen):
-    sku: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    quantity: Decimal = Field(gt=0)
-    unit: str
-    unit_net_price: Decimal = Field(ge=0)
-    discount_percent: Decimal = Field(ge=0, le=100)
-    vat_percent: Decimal = Field(ge=0, le=100)
-    line_net_total: Decimal = Field(ge=0)
+    sku: NonEmptyStr
+    description: NonEmptyStr
+    quantity: Quantity
+    unit: NonEmptyStr
+    unit_net_price: Amount
+    discount_percent: Percent
+    vat_percent: Percent
+    line_net_total: Amount
 
 
 class Payment(Frozen):
@@ -400,15 +450,15 @@ class Payment(Frozen):
 
 
 class Totals(Frozen):
-    net: Decimal
-    vat: Decimal
-    gross: Decimal
+    net: Amount
+    vat: Amount
+    gross: Amount
 
 
 class Order(Frozen):
-    external_reference: str = Field(min_length=1)
+    external_reference: NonEmptyStr
     order_date: date
-    currency: str = Field(min_length=3, max_length=3)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
     customer: Customer
     billing_address: Address
     delivery_address: Address
@@ -420,7 +470,7 @@ class Order(Frozen):
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `uv run pytest -q`
-Expected: `6 passed`
+Expected: `20 passed`
 
 - [ ] **Step 7: Commit**
 
@@ -494,6 +544,11 @@ def test_unpaid_without_date_is_fine(sample_order):
         update={"status": PaidStatus.UNPAID, "payment_date": None}
     )
     assert codes(sample_order.model_copy(update={"payment": payment})) == set()
+
+
+def test_unpaid_with_date_is_reported(sample_order):
+    payment = sample_order.payment.model_copy(update={"status": PaidStatus.UNPAID})
+    assert codes(sample_order.model_copy(update={"payment": payment})) == {"unpaid_with_date"}
 
 
 def test_unsupported_currency_is_reported(sample_order):
@@ -588,8 +643,12 @@ def _total_issues(order: Order) -> tuple[Issue, ...]:
 
 
 def _payment_issues(order: Order) -> tuple[Issue, ...]:
-    if order.payment.status is PaidStatus.PAID and order.payment.payment_date is None:
+    paid = order.payment.status is PaidStatus.PAID
+    has_date = order.payment.payment_date is not None
+    if paid and not has_date:
         return (Issue("paid_without_date", "status is PAID but no payment date was printed"),)
+    if not paid and has_date:
+        return (Issue("unpaid_with_date", "status is not PAID but a payment date was printed"),)
     return ()
 
 
@@ -610,7 +669,7 @@ def _contact_issues(order: Order) -> tuple[Issue, ...]:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_invariants.py -q`
-Expected: `11 passed`
+Expected: `12 passed`
 
 - [ ] **Step 5: Commit**
 
@@ -1130,6 +1189,8 @@ def test_critical_fields_use_printed_formats(sample_order):
     assert fields["items[0].unit_net_price"] == "250.00"
     assert fields["totals.gross"] == "678.30"
     assert fields["payment.payment_date"] == "2026-07-18"
+    assert fields["delivery_address.street"] == "Huttenstrasse 41"
+    assert fields["customer.phone"] == "+49 30 3550 1420"
 
 
 def test_no_mismatch_when_ocr_sees_everything(sample_order):
@@ -1187,7 +1248,10 @@ def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
         ("external_reference", order.external_reference),
         ("order_date", order.order_date.isoformat()),
         ("payment.status", order.payment.status.value),
+        ("customer.phone", order.customer.phone),
+        ("billing_address.street", order.billing_address.street),
         ("billing_address.zip", order.billing_address.zip),
+        ("delivery_address.street", order.delivery_address.street),
         ("delivery_address.zip", order.delivery_address.zip),
         ("totals.net", _amount(order.totals.net)),
         ("totals.vat", _amount(order.totals.vat)),
@@ -1293,7 +1357,7 @@ def order_image(tmp_path) -> Path:
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -q`
-Expected: all passed (`37 passed` on macOS)
+Expected: all passed (`52 passed` on macOS)
 
 - [ ] **Step 6: Commit**
 

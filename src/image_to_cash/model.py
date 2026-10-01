@@ -5,8 +5,15 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Bounded types: a garbled reading (e.g. "1E+30") must fail validation, not crash the money maths.
+NonEmptyStr = Annotated[str, Field(min_length=1)]
+Amount = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2)]
+Quantity = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=4)]
+Percent = Annotated[Decimal, Field(ge=0, le=100, max_digits=5, decimal_places=2)]
 
 
 class PaymentMethod(StrEnum):
@@ -21,35 +28,35 @@ class PaidStatus(StrEnum):
 
 
 class Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
 
 
 class Address(Frozen):
-    name: str = Field(min_length=1)
-    street: str = Field(min_length=1)
-    zip: str = Field(min_length=1)
-    city: str = Field(min_length=1)
-    country: str = Field(min_length=1)
+    name: NonEmptyStr
+    street: NonEmptyStr
+    zip: NonEmptyStr
+    city: NonEmptyStr
+    country: NonEmptyStr
 
 
 class Customer(Frozen):
     customer_id: str | None = None
-    company: str = Field(min_length=1)
-    alias: str = Field(min_length=1)
-    contact_name: str = Field(min_length=1)
+    company: NonEmptyStr
+    alias: NonEmptyStr
+    contact_name: NonEmptyStr
     email: str = Field(min_length=3)
-    phone: str = Field(min_length=1)
+    phone: NonEmptyStr
 
 
 class LineItem(Frozen):
-    sku: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    quantity: Decimal = Field(gt=0)
-    unit: str
-    unit_net_price: Decimal = Field(ge=0)
-    discount_percent: Decimal = Field(ge=0, le=100)
-    vat_percent: Decimal = Field(ge=0, le=100)
-    line_net_total: Decimal = Field(ge=0)
+    sku: NonEmptyStr
+    description: NonEmptyStr
+    quantity: Quantity
+    unit: NonEmptyStr
+    unit_net_price: Amount
+    discount_percent: Percent
+    vat_percent: Percent
+    line_net_total: Amount
 
 
 class Payment(Frozen):
@@ -59,15 +66,15 @@ class Payment(Frozen):
 
 
 class Totals(Frozen):
-    net: Decimal
-    vat: Decimal
-    gross: Decimal
+    net: Amount
+    vat: Amount
+    gross: Amount
 
 
 class Order(Frozen):
-    external_reference: str = Field(min_length=1)
+    external_reference: NonEmptyStr
     order_date: date
-    currency: str = Field(min_length=3, max_length=3)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
     customer: Customer
     billing_address: Address
     delivery_address: Address
