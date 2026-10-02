@@ -25,7 +25,8 @@ saving. The database log shows only Fakturama's own bookkeeping: its version, an
 | Switching editor tabs | `AXPress` on a tab returns success but doesn't switch. Click the tab. |
 | Dates (`CDateTime`) | Typing a whole date does nothing. Click the month segment, type `07`, Right, `14`, Right, `2026`, then Tab, which reads `Jul 14, 2026`. The segment order follows the locale's format, so verify by reading back. |
 | Icon buttons | `AXImage`s with help text but **no actions**. Click the centre of the frame. Examples: "Pick an address from the list of all contacts", "Open the contact editor to enter a new address", "Pick an item from the list of all products", "Add a new item…". |
-| Checkboxes and pop-ups | `AXPress` works and marks the editor dirty, as with the invoice's `paid`. A pop-up's options are its menu's children after `AXPress`. |
+| Checkboxes and pop-ups | `AXPress` works and marks the editor dirty, as with the invoice's `paid`. A pop-up's options are its menu's children after `AXPress`. `AXPress` on an option picks it, and `AXCancel` on the menu closes it. Neither needs a keystroke or focus. |
+| Outlines (Preferences page list) | Setting the outline's `AXSelectedRows` to one row switches the page. No mouse event is needed. |
 | Grids (NatTable) | `AXScrollArea` with no children. **But Cmd+C copies the selected rows to the clipboard, tab-separated.** List views give clean values, e.g. `true	Tax-free	Free of Tax	0.0`. The order's items grid gives some cells as Java `toString()` dumps, e.g. VAT. Cmd+A then Cmd+C selects and copies all. So grids are read through the clipboard (saved and restored around the copy), with OCR on the grid frame as the fallback. |
 | Closing editors | Cmd+W did nothing (focus). **File → Close All** asks with one "Save Parts" dialog per dirty editor. Untick, verify, then OK discards it. **OK with the box ticked saves.** |
 
@@ -57,7 +58,18 @@ saving. The database log shows only Fakturama's own bookkeeping: its version, an
    - Fakturama is frontmost. If not, activate it with `AXFrontmost` (`open -a` proved unreliable), then re-check, and stop if it still isn't.
    - No unexpected window is open (the modal guard).
 6. **Never press OK on "Save Parts"** unless the run means to save exactly those parts.
-7. **The locale leaks into defaults:** `EGP` currency and `Egypt` country. Set Fakturama's preferences (currency EUR, country Germany) before a run, and set the country per address.
+7. **The locale leaks into defaults.** Fakturama starts with `NL=en_EG`, taken from the Mac's region.
+   - **Currency:** this is a preference. General → Currency locale is now `Germany`, stored as
+     `PREFERENCE_CURRENCY_LOCALE=de/DE` in
+     `~/.fakturama2/.metadata/.plugins/org.eclipse.core.runtime/.settings/com.sebulli.fakturama.rcp.prefs`.
+     The example now reads `-1.234,57 €`, so amounts may need to be typed with a decimal comma.
+     Read every amount back.
+   - **Country:** there is no preference for it. A new contact's country is
+     `getDefaultLocale().getCountry()`, i.e. `EG`. Your Company → Country is only free text for
+     printed documents. So the flow sets the country on every address from `order.json`, which
+     always carries one.
+   - Launching with `-nl en_DE` would change the default country, but also the date and number
+     formats the spike measured. It is not used.
 8. **A run needs the Mac to itself.** During the spike, one keystroke test ran while another app was in front, and its text went there.
 
 ## Still open
@@ -65,3 +77,4 @@ saving. The database log shows only Fakturama's own bookkeeping: its version, an
 - Cmd+A copy across several rows. Only one-row grids were available: the database was empty.
 - The "Select the address" and product pickers with real rows: search, select, OK.
 - Saving: the first real save of a VAT, payment method, debtor, product, order and invoice belongs to the end-to-end run, against a restorable database copy.
+- Number entry under the `de/DE` currency locale: whether price fields expect `199,00` or accept `199.00`.
