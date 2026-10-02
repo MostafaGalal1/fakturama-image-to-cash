@@ -144,3 +144,7 @@ guarded, each value read back), then the database was restored and the bot ran e
 - **OCR alone missed rows in the VATs list**, so the bot thought VAT 19% was missing and created a
   second one. A grid's first row now counts as present when its strip shows dark text or the blue
   of a selected row, with OCR as the last resort.
+- **Input cannot be sent to Fakturama in the background.** Keys and clicks posted to its process
+  (`CGEventPostToPid`) while another app was in front never arrived: the search box kept its
+  text and the grid kept its selection. So an unattended run needs Fakturama in front on a machine
+  (or virtual machine) of its own.
