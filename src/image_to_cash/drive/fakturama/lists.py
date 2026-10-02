@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,6 +22,7 @@ GRID_DY = 80  # below the search row, inside the grid
 VIEW_TIMEOUT = 15
 LIST_ATTEMPTS = 3  # a list can lag a save by a moment
 ROW_X = 150  # into a row's text, clear of the grid's left edge
+TREE_ARROW = re.compile(r"^\W+")  # a leading expand arrow, read as >, › or similar
 TREE_WIDTH = 170  # Documents' category tree, at the view's left below its tabs
 
 
@@ -75,6 +77,11 @@ def search_until(
     return rows
 
 
+def tree_label(text: str) -> str:
+    """An OCR'd tree line without its expand arrow: macOS Vision reads "› Invoices"."""
+    return TREE_ARROW.sub("", text).strip()
+
+
 def pick_category(ctx: Context, name: str) -> None:
     """Clicks `name` in the view's category tree, found by OCR (the tree's items are not listed
     to accessibility), and waits for the view's filter label to show it."""
@@ -85,7 +92,7 @@ def pick_category(ctx: Context, name: str) -> None:
         shot = ctx.ui.capture(tree, Path(scratch) / "tree.png")
         with Image.open(shot) as image:
             scale = image.width / tree.width
-            boxes = [box for box in ctx.ocr.recognize(image.convert("RGB")) if box.text.strip() == name]
+            boxes = [box for box in ctx.ocr.recognize(image.convert("RGB")) if tree_label(box.text) == name]
     if len(boxes) != 1:
         raise NeedsReview("category_not_found", {"category": name})
     x = tree.x + (boxes[0].box.x + boxes[0].box.width / 2) / scale
