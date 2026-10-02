@@ -570,7 +570,9 @@ API_URL = "https://openrouter.ai/api/v1/chat/completions"
 API_KEY_ENV = "OPENROUTER_API_KEY"
 DEFAULT_MODEL = "anthropic/claude-sonnet-5.5"
 TIMEOUT_SECONDS = 120.0
-MAX_OUTPUT_TOKENS = 8192
+# An order reply is about 400 tokens plus 65 per line. OpenRouter reserves credit for the whole cap,
+# so a generous cap can fail a request the account could afford.
+MAX_OUTPUT_TOKENS = 3000
 MAX_UPLOAD_LONG_EDGE = 2048
 MAX_UPLOAD_BYTES = 3_700_000  # about 4.9 MB once base64-encoded; Anthropic's per-image limit is 5 MB
 JPEG_QUALITY = 90
