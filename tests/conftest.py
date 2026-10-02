@@ -1,15 +1,19 @@
+import json
 import sys
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+from image_to_cash.drive.backend.ax_roles import elements_from_records
+from image_to_cash.drive.elements import Element
 from image_to_cash.model import Order
 from image_to_cash.ocr import Box, TextBox
 from image_to_cash.reconcile import critical_fields
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SAMPLE_ORDER_JSON = FIXTURES / "sample_order.json"
+AX_FIXTURES = FIXTURES / "ax"  # accessibility snapshots of blank Fakturama editors
 
 
 def pytest_collection_modifyitems(config, items):
@@ -57,3 +61,14 @@ def order_image(tmp_path) -> Path:
     path = tmp_path / "order.png"
     Image.new("RGB", (40, 60), "white").save(path)
     return path
+
+
+@pytest.fixture
+def ax_snapshot():
+    """Load a recorded editor snapshot (tests/fixtures/ax/NAME.json) as neutral elements."""
+
+    def load(name: str) -> tuple[Element, ...]:
+        snapshot = json.loads((AX_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+        return elements_from_records(snapshot["elements"])
+
+    return load

@@ -1,0 +1,223 @@
+{
+ "editor": [
+  "*New TAX Rate"
+ ],
+ "group_rect": [
+  315,
+  125,
+  1197,
+  443
+ ],
+ "elements": [
+  {
+   "role": "SWTComposite",
+   "subrole": null,
+   "title": "New TAX Rate",
+   "value": null,
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    318,
+    151,
+    1191,
+    414
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "TAX Rate",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    865,
+    155,
+    97,
+    31
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Name of the tax rate. This is also the identifier used by the shop system.",
+   "enabled": "True",
+   "rect": [
+    442,
+    189,
+    1063,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Name",
+   "help": "Name of the tax rate. This is also the identifier used by the shop system.",
+   "enabled": "True",
+   "rect": [
+    404,
+    191,
+    33,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Category",
+   "help": "You can set a category to classify the tax rates",
+   "enabled": "True",
+   "rect": [
+    386,
+    213,
+    51,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": "Category",
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    443,
+    214,
+    1047,
+    14
+   ]
+  },
+  {
+   "role": "AXButton",
+   "subrole": null,
+   "title": "Open",
+   "value": null,
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1488,
+    214,
+    16,
+    14
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "The description is the text used in the documents",
+   "enabled": "True",
+   "rect": [
+    442,
+    232,
+    1063,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Description",
+   "help": "The description is the text used in the documents",
+   "enabled": "True",
+   "rect": [
+    374,
+    234,
+    63,
+    16
+   ]
+  },
+  {
+   "role": "AXPopUpButton",
+   "subrole": null,
+   "title": null,
+   "value": "S (Standard rate)",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    445,
+    259,
+    1057,
+    20
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "VAT code (E-Invoice)",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    324,
+    260,
+    113,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "0%",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    442,
+    283,
+    1063,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Value",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    406,
+    285,
+    31,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Tax-free",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    442,
+    311,
+    206,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Standard",
+   "help": "Name of the tax rate. This is also the identifier used by the shop system.",
+   "enabled": "True",
+   "rect": [
+    387,
+    313,
+    50,
+    16
+   ]
+  }
+ ]
+}

@@ -1,0 +1,503 @@
+{
+ "editor": [
+  "New Order"
+ ],
+ "group_rect": [
+  315,
+  125,
+  1197,
+  443
+ ],
+ "elements": [
+  {
+   "role": "AXImage",
+   "subrole": null,
+   "title": null,
+   "value": null,
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1225,
+    157,
+    34,
+    34
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Order",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1156,
+    158,
+    62,
+    31
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "PO000001",
+   "help": "Reference number of this document. Next document number and the format can be set unter preferences/number range",
+   "enabled": "True",
+   "rect": [
+    357,
+    163,
+    202,
+    21
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "Oct 2, 2026",
+   "help": "The document's date",
+   "enabled": "True",
+   "rect": [
+    746,
+    163,
+    133,
+    21
+   ]
+  },
+  {
+   "role": "AXPopUpButton",
+   "subrole": null,
+   "title": null,
+   "value": "Gross",
+   "help": "Specify whether the prices should be rounded to net or gross values",
+   "enabled": "True",
+   "rect": [
+    926,
+    165,
+    220,
+    20
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "No.",
+   "help": "Reference number of this document. Next document number and the format can be set unter preferences/number range",
+   "enabled": "True",
+   "rect": [
+    329,
+    166,
+    21,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Date",
+   "help": "The document's date",
+   "enabled": "True",
+   "rect": [
+    712,
+    166,
+    27,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Customer's reference. E.g.: Your order No.0001",
+   "enabled": "True",
+   "rect": [
+    387,
+    223,
+    405,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Cust.Ref.",
+   "help": "Customer's reference. E.g.: Your order No.0001",
+   "enabled": "True",
+   "rect": [
+    332,
+    225,
+    50,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Create a follow-up document",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1160,
+    231,
+    160,
+    14
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Addresses",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    325,
+    247,
+    57,
+    16
+   ]
+  },
+  {
+   "role": "AXRadioButton",
+   "subrole": null,
+   "title": "Invoice address",
+   "value": "True",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    388,
+    248,
+    111,
+    17
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Consultant, e.g.: Heinz Mueller",
+   "enabled": "True",
+   "rect": [
+    874,
+    256,
+    261,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Consultant",
+   "help": "Consultant, e.g.: Heinz Mueller",
+   "enabled": "True",
+   "rect": [
+    808,
+    258,
+    59,
+    16
+   ]
+  },
+  {
+   "role": "AXImage",
+   "subrole": null,
+   "title": null,
+   "value": null,
+   "help": "Pick an address from the list of all contacts",
+   "enabled": "True",
+   "rect": [
+    362,
+    268,
+    22,
+    22
+   ]
+  },
+  {
+   "role": "AXTextArea",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": null,
+   "rect": [
+    391,
+    269,
+    397,
+    44
+   ]
+  },
+  {
+   "role": "AXPopUpButton",
+   "subrole": null,
+   "title": null,
+   "value": "With VAT",
+   "help": "If this document is set to a tax rate with 0%, all the items of the document are calculated with 0% tax.",
+   "enabled": "True",
+   "rect": [
+    877,
+    285,
+    255,
+    20
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "VAT",
+   "help": "If this document is set to a tax rate with 0%, all the items of the document are calculated with 0% tax.",
+   "enabled": "True",
+   "rect": [
+    844,
+    286,
+    23,
+    16
+   ]
+  },
+  {
+   "role": "AXImage",
+   "subrole": null,
+   "title": null,
+   "value": null,
+   "help": "Open the contact editor to enter a new address",
+   "enabled": "True",
+   "rect": [
+    362,
+    295,
+    22,
+    22
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Items",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    319,
+    331,
+    31,
+    16
+   ]
+  },
+  {
+   "role": "AXImage",
+   "subrole": null,
+   "title": null,
+   "value": null,
+   "help": "Pick an item from the list of all products",
+   "enabled": "True",
+   "rect": [
+    330,
+    352,
+    22,
+    22
+   ]
+  },
+  {
+   "role": "AXImage",
+   "subrole": null,
+   "title": null,
+   "value": null,
+   "help": "Add a new item with default name and quantity '1'",
+   "enabled": "True",
+   "rect": [
+    334,
+    379,
+    18,
+    18
+   ]
+  },
+  {
+   "role": "AXImage",
+   "subrole": null,
+   "title": null,
+   "value": null,
+   "help": "Delete the selected item from the list of items",
+   "enabled": "True",
+   "rect": [
+    334,
+    402,
+    18,
+    18
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Remarks",
+   "help": "Enter an additional text that will be placed under the list of items.",
+   "enabled": "True",
+   "rect": [
+    319,
+    426,
+    48,
+    16
+   ]
+  },
+  {
+   "role": "AXTextArea",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Enter an additional text that will be placed under the list of items.",
+   "enabled": null,
+   "rect": [
+    376,
+    428,
+    455,
+    129
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Total Gross",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1189,
+    433,
+    62,
+    16
+   ]
+  },
+  {
+   "role": "AXImage",
+   "subrole": null,
+   "title": null,
+   "value": null,
+   "help": "Select one of the text templates in of the list of texts",
+   "enabled": "True",
+   "rect": [
+    347,
+    447,
+    22,
+    22
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "0%",
+   "help": "Enter a discount value in % for all items.",
+   "enabled": "True",
+   "rect": [
+    1256,
+    455,
+    249,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Discount",
+   "help": "Enter a discount value in % for all items.",
+   "enabled": "True",
+   "rect": [
+    1202,
+    457,
+    49,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "0,00 €",
+   "help": "It's possible to enter a different shipping value than those of the selected shipping entry",
+   "enabled": "True",
+   "rect": [
+    1256,
+    479,
+    249,
+    21
+   ]
+  },
+  {
+   "role": "AXButton",
+   "subrole": null,
+   "title": "",
+   "value": null,
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1230,
+    480,
+    22,
+    19
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Shipping",
+   "help": "It's possible to enter a different shipping value than those of the selected shipping entry",
+   "enabled": "True",
+   "rect": [
+    846,
+    481,
+    48,
+    16
+   ]
+  },
+  {
+   "role": "AXComboBox",
+   "subrole": null,
+   "title": null,
+   "value": "Free of shipping costs",
+   "help": "It's possible to enter a different shipping value than those of the selected shipping entry",
+   "enabled": "True",
+   "rect": [
+    900,
+    481,
+    351,
+    18
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "VAT",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1228,
+    505,
+    23,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Total",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1223,
+    529,
+    28,
+    16
+   ]
+  }
+ ]
+}
