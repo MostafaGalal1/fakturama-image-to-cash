@@ -2792,43 +2792,83 @@ git commit -m "feat: add extract and approve command-line commands"
 
 ### Task 11: Run the real pipeline on the supplied image
 
+The demo uses only the supplied image. The run stops at review, a person checks the draft, then
+approves it. There is no synthetic sharp image.
+
 **Files:**
-- Create: `samples/sales-order-input.png`, `docs/extraction-run-notes.md`
+- Create: `samples/sales-order-input.png`, `tests/test_sample_run.py`, `docs/extraction-run-notes.md`
 
 - [ ] **Step 1: Copy the supplied image out of the brief**
 
 ```bash
 mkdir -p samples
-uv run python - <<'EOF'
+uv run python - <<'PY'
 import base64, re
 from pathlib import Path
 brief = Path.home() / "Downloads" / "[EXTERNAL] Take home project 2026.md"
 match = re.search(r"\[image1\]:\s*<data:image/png;base64,([A-Za-z0-9+/=]+)>", brief.read_text())
 Path("samples/sales-order-input.png").write_bytes(base64.b64decode(match.group(1)))
 print("saved")
-EOF
+PY
 ```
 Expected: `saved`
 
-- [ ] **Step 2: Run extraction with real macOS OCR**
+- [ ] **Step 2: Write the regression test**
+
+`tests/test_sample_run.py`:
+
+```python
+import json
+from pathlib import Path
+
+import pytest
+
+from image_to_cash import cli
+
+SAMPLE_IMAGE = Path(__file__).parent.parent / "samples" / "sales-order-input.png"
+# Not legible at 385x530 even to a person (see tests/fixtures/sample_order.NOTES.md).
+ILLEGIBLE_FIELDS = {"items[0].sku", "billing_address.street", "delivery_address.street", "customer.phone"}
+
+
+@pytest.mark.macos
+def test_supplied_image_goes_to_review_with_the_illegible_fields_flagged(tmp_path, sample_order_path):
+    argv = ["extract", str(SAMPLE_IMAGE), "--fixture", str(sample_order_path), "--out", str(tmp_path)]
+    assert cli.main(argv) == cli.EXIT_REVIEW
+    assert not (tmp_path / "order.json").exists()
+    review = json.loads((tmp_path / "review.json").read_text(encoding="utf-8"))
+    assert ILLEGIBLE_FIELDS <= {mismatch["field"] for mismatch in review["mismatches"]}
+    assert review["issues"] == []
+```
+
+Run: `uv run pytest tests/test_sample_run.py -v`
+Expected: 1 passed
+
+- [ ] **Step 3: Run extraction with real macOS OCR**
 
 Run: `uv run image-to-cash extract samples/sales-order-input.png --fixture tests/fixtures/sample_order.json --out out/sample`
-Expected:
-- Exit code 3 (`needs review`), with mismatches at least for the blurry fields listed in `sample_order.NOTES.md`.
-- If it exits 0 instead, OCR confirmed everything. Record that as well.
+Expected: exit code 3 (`needs review`); the four illegible fields are among the mismatches; 0 issues.
 
-- [ ] **Step 3: Record what OCR confirmed and what it didn't**
+- [ ] **Step 4: Check the draft by hand, then approve it**
+
+Compare every field of `draft_order` in `out/sample/review.json` with the image, not only the
+flagged ones. Then:
+
+Run: `uv run image-to-cash approve out/sample/review.json --out out/sample`
+Expected: exit code 0, `approved WEB-2026-0714-A17: ...`, and `out/sample/order.json` is written.
+
+- [ ] **Step 5: Record the run**
 
 Write `docs/extraction-run-notes.md` containing:
-- the exact command;
-- the exit code;
-- the `mismatches` list copied from `out/sample/review.json`;
-- one line per mismatch saying whether it's a blurry-image field (expected) or a real problem to fix.
+- both commands, their output and exit codes;
+- what OCR confirmed;
+- one row per mismatch, saying whether a person can read that field on the image;
+- how the arithmetic checks tie the unconfirmed line amounts to the confirmed totals;
+- what the human check covers, and which fields approving vouches for.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add samples/sales-order-input.png docs/extraction-run-notes.md
+git add samples/sales-order-input.png tests/test_sample_run.py docs/extraction-run-notes.md docs/plans/2026-10-01-plan-1-core-and-extraction.md
 git commit -m "docs: record first real extraction run on the supplied image"
 ```
 
