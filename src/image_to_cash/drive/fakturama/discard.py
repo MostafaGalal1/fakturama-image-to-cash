@@ -23,7 +23,7 @@ from image_to_cash.errors import NeedsReview
 SELECTORS = frozenset({DEBTOR_SELECTOR, PRODUCT_SELECTOR})
 SAVE_PARTS = "Save Parts"
 UNTICKED = "0"
-MAX_EDITORS = 10
+MAX_EDITORS = 50
 CLOSE_TIMEOUT = 5.0
 TICK_TIMEOUT = 2.0
 POLL = 0.2
@@ -35,12 +35,11 @@ def discard_editors(wb: Workbench) -> tuple[str, ...]:
     for dialog in _dialogs(wb):
         _cancel_selector(wb, dialog)
     closed: list[str] = []
-    for _ in range(MAX_EDITORS):
-        tabs = wb.editor_tabs()
-        if not tabs:
-            return tuple(closed)
+    while tabs := wb.editor_tabs():
+        if len(closed) == MAX_EDITORS:  # each close is read back, so this only bounds a surprise
+            raise NeedsReview("editors_left_open", {"closed": str(len(closed)), "open": str(len(tabs))})
         closed.append(_close_active(wb, len(tabs)))
-    raise NeedsReview("editors_left_open", {"closed": ", ".join(closed)})
+    return tuple(closed)
 
 
 def _cancel_selector(wb: Workbench, dialog: Window) -> None:

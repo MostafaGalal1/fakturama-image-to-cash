@@ -129,3 +129,9 @@ def test_a_dialog_the_bot_did_not_open_is_left_for_a_person():
 
 def test_nothing_open_is_nothing_to_do():
     assert discard_editors(Fakturama({})) == ()
+
+
+def test_the_last_of_many_editors_is_checked_before_giving_up():
+    """Live, macOS: ten saved editors closed, then the loop stopped without looking again."""
+    editors = {f"Editor {i}": "clean" for i in range(10)}
+    assert len(discard_editors(Fakturama(editors))) == 10
