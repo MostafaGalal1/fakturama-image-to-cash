@@ -16,7 +16,7 @@ from PIL import Image
 
 from image_to_cash.drive.backend.base import BackendError
 from image_to_cash.drive.backend.keys import WIN_EXTENDED_KEYS, WIN_MODIFIER_VK, WIN_VK_CODES, Chord
-from image_to_cash.drive.backend.win_units import BASE_DPI, DoubleClick, menu_label
+from image_to_cash.drive.backend.win_units import BASE_DPI, STATE_IMAGE_MASK, DoubleClick, menu_label
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -29,6 +29,7 @@ SW_RESTORE = 9
 GWL_STYLE = -16
 ES_MULTILINE = 0x0004
 BM_CLICK = 0x00F5
+LVM_GETITEMSTATE = 0x102C
 WM_COMMAND = 0x0111
 WM_INITMENUPOPUP = 0x0117
 MF_BYPOSITION = 0x0400
@@ -293,6 +294,12 @@ def post_click(hwnd: int) -> None:
     """A native button's own click, posted so a dialog it opens cannot block the caller."""
     if not user32.PostMessageW(hwnd, BM_CLICK, 0, 0):
         raise BackendError(f"posting a click to the button failed (error {ctypes.get_last_error()})")
+
+
+def list_item_state(hwnd: int, index: int) -> int:
+    """A list-view row's state image bits (win_units.tick_from_state reads them). A plain message,
+    no input: it only reads."""
+    return int(user32.SendMessageW(hwnd, LVM_GETITEMSTATE, index, STATE_IMAGE_MASK))
 
 
 # Menus: found by their text in the window's menu bar and run by command id, without opening them.

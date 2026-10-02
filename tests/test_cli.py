@@ -239,3 +239,11 @@ def test_extract_help_names_the_default_model(capsys):
 )
 def test_paths_in_commands_are_quoted_for_the_platforms_shell(platform, path, shown):
     assert cli.shell_arg(path, platform) == shown
+
+
+def test_batch_exits_needs_review_when_an_image_went_to_review(tmp_path, sample_order_path, monkeypatch, capsys):
+    from image_to_cash import batch
+
+    monkeypatch.setattr(batch, "run_batch", lambda *args, **kwargs: [batch.Outcome("a.png", batch.REVIEW, "see review.json")])
+    code = cli.main(["batch", str(tmp_path), "--reader", "fixture", "--fixture", str(sample_order_path), "--ocr", "macos-vision"])
+    assert code == cli.EXIT_REVIEW and "review   a.png" in capsys.readouterr().out

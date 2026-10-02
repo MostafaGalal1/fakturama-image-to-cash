@@ -3,8 +3,10 @@
 Each image ends in one subfolder of the inbox, so nothing is processed twice:
 - done/    the Order and Invoice were saved and verified;
 - review/  extraction needs a person (review.json says why); Fakturama was not touched;
-- stopped/ the drive stopped. The batch stops with it: the stop may leave unsaved editors open,
-           and the next order must not start on top of them.
+- stopped/ the drive stopped. A stop for review leaves the bot's own editors open: with `discard`
+           they are closed unsaved (drive/fakturama/discard.py) and the batch goes on. Any other
+           failure, or a discard that cannot finish, ends the batch: the next order must not start
+           on top of what is open.
 
 Results go to OUT/<image name>/ (order.json or review.json, drive/run.jsonl and screens), and one
 line per image to OUT/batch.jsonl.
@@ -32,29 +34,33 @@ class Outcome:
     image: str
     status: str
     detail: str
+    cleared: bool = False  # a stop whose editors were discarded, so the batch went on
 
 
 Extract = Callable[[Path, Path], Path | None]  # image, result folder -> order.json, or None for review
 Drive = Callable[[Path, Path], str]  # order.json, drive folder -> "PO… / INV…"; raises to stop
+Discard = Callable[[], tuple[str, ...]]  # closes what a stop left open -> editors closed; raises if it cannot
 
 
-def run_batch(inbox: Path, out: Path, extract: Extract, drive: Drive, *, watch: float | None = None) -> list[Outcome]:
-    """Processes the inbox until it is empty (or, with `watch` seconds, until a drive stops)."""
+def run_batch(
+    inbox: Path, out: Path, extract: Extract, drive: Drive, *, discard: Discard | None = None, watch: float | None = None
+) -> list[Outcome]:
+    """Processes the inbox until it is empty (or, with `watch` seconds, until a stop ends it)."""
     outcomes: list[Outcome] = []
     while True:
         for image in _waiting(inbox):
-            outcome = _one(image, out / image.stem, extract, drive)
+            outcome = _one(image, out / image.stem, extract, drive, discard)
             _move(image, inbox / outcome.status)
             _log(out, outcome)
             outcomes.append(outcome)
-            if outcome.status == STOPPED:
+            if outcome.status == STOPPED and not outcome.cleared:
                 return outcomes
         if watch is None:
             return outcomes
         time.sleep(watch)
 
 
-def _one(image: Path, folder: Path, extract: Extract, drive: Drive) -> Outcome:
+def _one(image: Path, folder: Path, extract: Extract, drive: Drive, discard: Discard | None) -> Outcome:
     try:
         order = extract(image, folder)
     except (OSError, ValueError, RuntimeError) as error:  # unreadable image, reader or OCR failure
@@ -64,9 +70,19 @@ def _one(image: Path, folder: Path, extract: Extract, drive: Drive) -> Outcome:
     try:
         return Outcome(image.name, DONE, drive(order, folder / "drive"))
     except NeedsReview as review:
-        return Outcome(image.name, STOPPED, f"stopped for review: {review}")
-    except RuntimeError as error:  # a backend refusal or failure, already in run.jsonl
+        return _stopped(image.name, f"stopped for review: {review}", discard)
+    except Exception as error:  # a refusal, timeout or failure, already in run.jsonl: never discarded
         return Outcome(image.name, STOPPED, f"error: {error}")
+
+
+def _stopped(image: str, detail: str, discard: Discard | None) -> Outcome:
+    if discard is None:
+        return Outcome(image, STOPPED, detail)
+    try:
+        closed = discard()
+    except Exception as error:  # what is open stays for a person, and the batch ends
+        return Outcome(image, STOPPED, f"{detail}; not discarded: {error}")
+    return Outcome(image, STOPPED, f"{detail}; discarded: {', '.join(closed) or 'nothing open'}", cleared=True)
 
 
 def _waiting(inbox: Path) -> Iterator[Path]:

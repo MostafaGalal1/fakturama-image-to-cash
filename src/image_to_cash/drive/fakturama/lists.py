@@ -12,7 +12,7 @@ from PIL import Image
 
 from image_to_cash.drive.elements import Element, Rect, Role
 from image_to_cash.drive.fakturama.context import Context
-from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, grid_at, has_rows, row_y
+from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, grid_at, has_rows, measure_rows, row_y
 from image_to_cash.drive.locate import LocatorError, by_title, right_of_label
 from image_to_cash.drive.waits import wait_until
 from image_to_cash.errors import NeedsReview
@@ -54,7 +54,7 @@ def search_view(
     grid = grid_at(ui, view.center[0], view.y + GRID_DY, menu[-1])
     if not has_rows(ui, ctx.ocr, grid):
         return ()
-    return parse(copy_all(ui, grid))
+    return parse(copy_all(ui, grid, rows=measure_rows(ui, ctx.ocr, grid)))
 
 
 def search_until(

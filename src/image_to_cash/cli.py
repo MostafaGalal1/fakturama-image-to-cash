@@ -1,4 +1,5 @@
-"""Command line: `image-to-cash extract IMAGE`, `approve DRAFT` and `drive ORDER_JSON`."""
+"""Command line: `image-to-cash extract IMAGE`, `approve DRAFT`, `drive ORDER_JSON`, `batch INBOX`
+and `discard`."""
 
 from __future__ import annotations
 
@@ -66,6 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
     batch_cmd.add_argument("--ocr", default=DEFAULT_ENGINE, choices=ENGINES)
     batch_cmd.add_argument("--out", type=Path, default=Path("out/batch"), help="results, one folder per image")
     batch_cmd.add_argument("--watch", type=float, metavar="SECONDS", help="keep watching the inbox at this interval")
+    batch_cmd.add_argument(
+        "--keep-open", action="store_true", help="end the batch at a stop for review, leaving its editors open"
+    )
+    commands.add_parser("discard", help="close Fakturama's open editors without saving, after a stop")
     return parser
 
 
@@ -78,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
             return _drive(args)
         if args.command == "batch":
             return _batch(args)
+        if args.command == "discard":
+            return _discard()
         return _approve(args)
     except (ReaderError, OcrError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -159,7 +166,7 @@ def _drive(args: argparse.Namespace) -> int:
 
 
 def _batch(args: argparse.Namespace) -> int:
-    from image_to_cash.batch import STOPPED, run_batch
+    from image_to_cash.batch import DONE, STOPPED, run_batch
     from image_to_cash.drive.flow import drive
     from image_to_cash.drive.preflight import check_currency, load_order
 
@@ -182,13 +189,41 @@ def _batch(args: argparse.Namespace) -> int:
         result = drive(load_order(order_path), *driver[0], folder)
         return f"order {result.order_number}, invoice {result.invoice_number}"
 
-    outcomes = run_batch(args.inbox, args.out, read, enter, watch=args.watch)
+    def discard() -> tuple[str, ...]:
+        if not driver:
+            raise RuntimeError("the stop came before Fakturama was attached")
+        return _discard_editors(driver[0][0], args.out / "discard")
+
+    outcomes = run_batch(args.inbox, args.out, read, enter, discard=None if args.keep_open else discard, watch=args.watch)
     for outcome in outcomes:
         print(f"{outcome.status:8} {outcome.image}: {outcome.detail}")
-    if any(outcome.status == STOPPED for outcome in outcomes):
+    if any(outcome.status == STOPPED and not outcome.cleared for outcome in outcomes):
         print("batch stopped: finish or discard Fakturama's open editors, then run it again", file=sys.stderr)
         return EXIT_REVIEW
+    if any(outcome.status != DONE for outcome in outcomes):
+        return EXIT_REVIEW  # the batch went on, but an image in review/ or stopped/ needs a person
     return EXIT_OK
+
+
+def _discard() -> int:
+    try:
+        backend, _ = _driver()
+        closed = _discard_editors(backend, Path("out/discard"))
+    except NeedsReview as review:
+        print(f"not discarded: {review}", file=sys.stderr)
+        return EXIT_REVIEW
+    except RuntimeError as error:  # BackendError: the accessibility API refused or failed
+        print(f"error: {error}", file=sys.stderr)
+        return EXIT_ERROR
+    print(f"closed without saving: {', '.join(closed) or 'nothing was open'}")
+    return EXIT_OK
+
+
+def _discard_editors(backend: UiBackend, shots: Path) -> tuple[str, ...]:
+    from image_to_cash.drive.fakturama.discard import discard_editors
+    from image_to_cash.drive.fakturama.workbench import Workbench
+
+    return discard_editors(Workbench(backend, shots))
 
 
 def _driver() -> tuple[UiBackend, OcrEngine]:

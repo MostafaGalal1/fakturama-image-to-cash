@@ -16,7 +16,7 @@ from image_to_cash.drive.backend.base import UiBackend
 from image_to_cash.drive.fakturama.context import Context
 from image_to_cash.drive.fakturama.debtor import create_debtor, select_debtor
 from image_to_cash.drive.fakturama.invoice import check_copied_from_order, check_invoice_listed, check_order_listed, record_payment
-from image_to_cash.drive.fakturama.master_data import ensure_vat
+from image_to_cash.drive.fakturama.master_data import ensure_payment_method, ensure_vat
 from image_to_cash.drive.fakturama.order import OrderEditor
 from image_to_cash.drive.fakturama.product import Picked, create_product, select_product
 from image_to_cash.drive.fakturama.resume import find_earlier, reopen_order
@@ -66,9 +66,12 @@ def _run(ctx: Context, order: NormalizedOrder) -> DriveResult:
     if earlier.order is not None:
         editor = reopen_order(ctx, earlier)
         ctx.record("order_resumed", Outcome.FOUND, number=earlier.order.number)
+        ensure_payment_method(ctx, order.payment.method)  # the stop may have been its absence
         return _invoice(ctx, editor, order, earlier.order.number)
     editor = OrderEditor.open(ctx, order)
-    _resolve_debtor(ctx, editor, order)
+    if _resolve_debtor(ctx, editor, order) is Outcome.FOUND:
+        # The Invoice needs the image's payment method; creating a Debtor made sure of it already.
+        ensure_payment_method(ctx, order.payment.method)
     products = {product.sku: product for product in order.products}
     for index, line in enumerate(order.lines):
         product = products[line.sku]
@@ -103,16 +106,19 @@ def _invoice(ctx: Context, editor: OrderEditor, order: NormalizedOrder, order_nu
     return DriveResult(order_number, invoice_number)
 
 
-def _resolve_debtor(ctx: Context, editor: OrderEditor, order: NormalizedOrder) -> None:
+def _resolve_debtor(ctx: Context, editor: OrderEditor, order: NormalizedOrder) -> Outcome:
     """Brief §2: select from the Order; else create, then select the new Debtor from the Order."""
+    resolved = Outcome.FOUND
     if select_debtor(ctx, editor, order.debtor):
         ctx.record("debtor", Outcome.FOUND, company=order.debtor.company)
     else:
+        resolved = Outcome.CREATED
         create_debtor(ctx, order.debtor, order.payment.method)
         if not select_debtor(ctx, editor, order.debtor):
             raise NeedsReview("debtor_not_selectable", {"company": order.debtor.company})
     ctx.wb.shot("order-debtor")
     ctx.record("debtor_selected", Outcome.CHECKED, company=order.debtor.company)
+    return resolved
 
 
 def _debtor_still_selected(editor: OrderEditor, order: NormalizedOrder) -> bool:

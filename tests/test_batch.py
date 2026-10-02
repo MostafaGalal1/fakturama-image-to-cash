@@ -65,3 +65,37 @@ def test_a_name_processed_before_does_not_overwrite(inbox, tmp_path):
     (inbox / "done" / "a.png").write_bytes(b"old")
     run_batch(inbox, tmp_path / "out", extract_all, lambda order, folder: "ok")
     assert (inbox / "done" / "a.png").read_bytes() == b"old" and (inbox / "done" / "a-1.png").exists()
+
+
+def test_a_review_stop_is_discarded_and_the_batch_goes_on(inbox, tmp_path):
+    def drive(order, folder):
+        if folder.parent.name == "a":
+            raise NeedsReview("totals_mismatch", {"field": "Total"})
+        return "ok"
+
+    outcomes = run_batch(inbox, tmp_path / "out", extract_all, drive, discard=lambda: ("New Order",))
+    assert [(o.image, o.status) for o in outcomes] == [("a.png", "stopped"), ("b.jpg", "done"), ("c.png", "done")]
+    assert outcomes[0].cleared and "discarded: New Order" in outcomes[0].detail
+
+
+def test_a_discard_that_stops_ends_the_batch(inbox, tmp_path):
+    def drive(order, folder):
+        raise NeedsReview("totals_mismatch", {"field": "Total"})
+
+    def discard():
+        raise NeedsReview("dialog_open", {"dialog": "Duplicate Contact"})
+
+    outcomes = run_batch(inbox, tmp_path / "out", extract_all, drive, discard=discard)
+    assert [(o.image, o.status, o.cleared) for o in outcomes] == [("a.png", "stopped", False)]
+    assert "not discarded" in outcomes[0].detail and (inbox / "b.jpg").exists()
+
+
+def test_a_failure_is_not_discarded_and_ends_the_batch(inbox, tmp_path):
+    discarded = []
+
+    def drive(order, folder):
+        raise TimeoutError("timed out after 5s waiting for the selector")
+
+    outcomes = run_batch(inbox, tmp_path / "out", extract_all, drive, discard=lambda: discarded.append(1) or ())
+    assert [(o.image, o.status) for o in outcomes] == [("a.png", "stopped")]
+    assert discarded == [] and "error: timed out" in outcomes[0].detail

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from statistics import median
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -87,11 +86,11 @@ def rows_from_text(centres: Sequence[float], layout: Layout) -> Rows:
     rows = [sum(line) / len(line) for line in lines if sum(line) / len(line) > layout.header_height]
     if not rows:
         return assumed
-    gaps = [later - earlier for earlier, later in zip(rows, rows[1:], strict=False)]
-    pitch = median(gaps) if gaps else assumed.pitch
+    # Rows never lie closer than one pitch; text below them (a grid's frame can reach into the
+    # totals beside it) or an empty row between them only adds larger gaps.
     low, high = PLAUSIBLE_PITCH
-    if not low * assumed.pitch <= pitch <= high * assumed.pitch:
-        pitch = assumed.pitch
+    gaps = [later - earlier for earlier, later in zip(rows, rows[1:], strict=False)]
+    pitch = min((gap for gap in gaps if low * assumed.pitch <= gap <= high * assumed.pitch), default=assumed.pitch)
     first = rows[0] if rows[0] < layout.header_height + pitch else assumed.first_dy  # an empty first row
     return Rows(first, pitch)
 
@@ -118,16 +117,18 @@ def row_drawn(pixels: Image.Image) -> bool:
     return marked > max(MIN_MARKED_PIXELS, pixels.width * pixels.height * MIN_MARKED_SHARE)
 
 
-def copy_all(ui: UiBackend, grid: Element, *, x_offset: float = 150) -> str:
+def copy_all(ui: UiBackend, grid: Element, *, x_offset: float = 150, rows: Rows | None = None) -> str:
     """Every row of a grid that has rows: click into it, select all, copy."""
-    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0)))
+    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0, rows)))
     ui.key("primary+a")
     return ui.copy_selection()
 
 
-def select_row(ui: UiBackend, grid: Element, index: int, rows: int, *, x_offset: float = 150) -> str:
+def select_row(
+    ui: UiBackend, grid: Element, index: int, rows: int, *, x_offset: float = 150, measured: Rows | None = None
+) -> str:
     """Leave exactly row `index` selected and return its copy, for the caller to confirm."""
-    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0)))
+    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0, measured)))
     for _ in range(rows):
         ui.key("up")
     for _ in range(index):
