@@ -1,6 +1,6 @@
 import pytest
 
-from image_to_cash.drive.backend.win_units import Scale, menu_label, focus_owner
+from image_to_cash.drive.backend.win_units import DoubleClick, Scale, menu_label, focus_owner
 from image_to_cash.drive.elements import Rect
 
 
@@ -48,3 +48,16 @@ def test_pid_zero_means_nothing_holds_the_focus():
     assert focus_owner(0) is None
     assert focus_owner(None) is None
     assert focus_owner(5640) == 5640
+
+
+DOUBLE_CLICK = DoubleClick(seconds=0.5, reach=2)
+
+
+def test_a_second_click_on_the_same_spot_waits_out_the_double_click_time():
+    assert DOUBLE_CLICK.wait_before((10.0, 100, 200), now=10.2, x=101, y=200) == pytest.approx(0.3)
+
+
+def test_a_click_elsewhere_or_later_does_not_wait():
+    assert DOUBLE_CLICK.wait_before((10.0, 100, 200), now=10.2, x=110, y=200) == 0.0
+    assert DOUBLE_CLICK.wait_before((10.0, 100, 200), now=10.6, x=100, y=200) == 0.0
+    assert DOUBLE_CLICK.wait_before(None, now=10.0, x=100, y=200) == 0.0

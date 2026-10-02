@@ -45,6 +45,24 @@ def _inside(child: Frame, parent: Frame) -> bool:
     return parent[0] <= child[0] and parent[1] <= child[1] and child[2] <= parent[2] and child[3] <= parent[3]
 
 
+@dataclass(frozen=True)
+class DoubleClick:
+    """Two clicks closer than this, in seconds and in pixels either way, make a double click."""
+
+    seconds: float
+    reach: int
+
+    def wait_before(self, last: tuple[float, int, int] | None, now: float, x: int, y: int) -> float:
+        """Seconds to wait so a single click at (x, y) is not read as the second half of a double
+        click with the `last` one (time, x, y): the selector's row would then be accepted."""
+        if last is None:
+            return 0.0
+        then, last_x, last_y = last
+        if abs(x - last_x) > self.reach or abs(y - last_y) > self.reach:
+            return 0.0
+        return max(0.0, then + self.seconds - now)
+
+
 def focus_owner(pid: int | None) -> int | None:
     """The process holding the keyboard focus. UI Automation answers pid 0 (the desktop) while no
     window holds it, as right after a dialog closes itself: that is no answer, not another app."""

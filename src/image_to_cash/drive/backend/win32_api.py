@@ -16,7 +16,7 @@ from PIL import Image
 
 from image_to_cash.drive.backend.base import BackendError
 from image_to_cash.drive.backend.keys import WIN_EXTENDED_KEYS, WIN_MODIFIER_VK, WIN_VK_CODES, Chord
-from image_to_cash.drive.backend.win_units import BASE_DPI, menu_label
+from image_to_cash.drive.backend.win_units import BASE_DPI, DoubleClick, menu_label
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -38,6 +38,7 @@ INPUT_MOUSE, INPUT_KEYBOARD = 0, 1
 KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE = 0x0001, 0x0002, 0x0004
 MOUSEEVENTF_MOVE = 0x0001
 GA_ROOTOWNER, SW_MINIMIZE = 3, 6
+SM_CXDOUBLECLK, SM_CYDOUBLECLK = 36, 37
 MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
 CF_UNICODETEXT = 13
 NOT_MEMORY_FORMATS = frozenset({2, 3, 9, 14, 0x80, 0x82, 0x83, 0x8E})  # GDI handles, not memory blocks
@@ -141,6 +142,8 @@ def _signatures() -> None:
         ("TranslateMessage", (ctypes.POINTER(wintypes.MSG),), wintypes.BOOL),
         ("DispatchMessageW", (ctypes.POINTER(wintypes.MSG),), ctypes.c_ssize_t),
         ("GetAncestor", (wintypes.HWND, wintypes.UINT), wintypes.HWND),
+        ("GetDoubleClickTime", (), wintypes.UINT),
+        ("GetSystemMetrics", (ctypes.c_int,), ctypes.c_int),
         ("CreateWindowExW", (wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_int, ctypes.c_int,
                              ctypes.c_int, ctypes.c_int, wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID), wintypes.HWND),
         ("GetWindowDC", (wintypes.HWND,), wintypes.HDC),
@@ -362,6 +365,12 @@ def type_character(char: str) -> None:
         *(_key(scan=unit, flags=KEYEVENTF_UNICODE) for unit in units),
         *(_key(scan=unit, flags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP) for unit in units),
     )
+
+
+def double_click_limits() -> DoubleClick:
+    """How close in time and place two clicks must be for Windows to make them a double click."""
+    reach = max(user32.GetSystemMetrics(SM_CXDOUBLECLK), user32.GetSystemMetrics(SM_CYDOUBLECLK)) // 2
+    return DoubleClick(seconds=user32.GetDoubleClickTime() / 1000, reach=reach)
 
 
 def click_at(x: int, y: int, count: int) -> None:

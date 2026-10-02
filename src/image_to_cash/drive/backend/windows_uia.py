@@ -60,6 +60,8 @@ class WindowsUiaBackend:
         self._main_hwnd = main_hwnd
         self._scale = Scale.from_dpi(win32.window_dpi(main_hwnd))
         self._clicked: object | None = None  # the field that should hold keyboard focus for typing
+        self._double_click = win32.double_click_limits()
+        self._last_click: tuple[float, int, int] | None = None  # (monotonic time, pixel x, pixel y)
 
     @classmethod
     def attach(cls) -> WindowsUiaBackend:
@@ -204,8 +206,12 @@ class WindowsUiaBackend:
             wait_until(lambda: self._on_top(handle, x, y), what="the target to be on top", timeout=CLICK_SETTLE_SECONDS, poll=0.1)
         except WaitTimeout:
             raise UnsafeToAct(f"something else covers the target at ({x:.0f}, {y:.0f}); refusing to click") from None
+        pixel = self._scale.to_pixels(x, y)
+        if count == 1:
+            time.sleep(self._double_click.wait_before(self._last_click, time.monotonic(), *pixel))
         self._guard()
-        win32.click_at(*self._scale.to_pixels(x, y), count)
+        win32.click_at(*pixel, count)
+        self._last_click = (time.monotonic(), *pixel)
         self._clicked = handle
         if _native(handle) in TEXT_TYPES:
             try:
