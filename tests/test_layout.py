@@ -65,3 +65,18 @@ def test_a_selector_grid_is_the_pane_below_its_search_row():
     outer = Element(Role.OTHER, Rect(362, 56, 780, 466))
     grid = Element(Role.OTHER, Rect(362, 90, 780, 432))
     assert _selector_grid((Element(Role.OTHER, Rect(362, 56, 787, 515)), outer, grid)) is grid
+
+
+def test_rows_are_measured_from_the_text_lines_below_the_header():
+    from image_to_cash.drive.fakturama.grids import Rows, rows_from_text
+
+    centres = (9.0, 10.0, 31.0, 31.5, 53.25, 75.25)  # header, then three rows 22 apart
+    assert rows_from_text(centres, WINDOWS_LAYOUT) == Rows(31.25, 22.0)
+
+
+def test_too_little_text_keeps_the_layouts_rows():
+    from image_to_cash.drive.fakturama.grids import Rows, rows_from_text
+
+    assert rows_from_text((9.0,), WINDOWS_LAYOUT) == Rows.assumed(WINDOWS_LAYOUT)
+    assert rows_from_text((9.0, 31.0), WINDOWS_LAYOUT) == Rows(31.0, WINDOWS_LAYOUT.row_height)
+    assert rows_from_text((9.0, 31.0, 131.0), WINDOWS_LAYOUT).pitch == WINDOWS_LAYOUT.row_height  # 100 apart: noise

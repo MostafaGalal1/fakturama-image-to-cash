@@ -10,7 +10,7 @@ from image_to_cash.drive.elements import Element, Rect, Role
 from image_to_cash.drive.fakturama.context import Context
 from image_to_cash.drive.fakturama.copied import LineRow, parse_line_rows
 from image_to_cash.drive.fakturama.fields import set_date, shown
-from image_to_cash.drive.fakturama.grids import column_centres, copy_all, copy_line, edit_cell, grid_at
+from image_to_cash.drive.fakturama.grids import column_centres, copy_all, copy_line, edit_cell, grid_at, measure_rows
 from image_to_cash.drive.fakturama.rules import check_line
 from image_to_cash.drive.formats import GERMAN, format_amount, parse_amount
 from image_to_cash.drive.fakturama import controls as find
@@ -76,7 +76,8 @@ class DocumentEditor:
         return parse_line_rows(copy_all(self.ctx.ui, grid, x_offset=12))
 
     def line(self, index: int) -> LineRow:
-        rows = parse_line_rows(copy_line(self.ctx.ui, self.grid(), index))
+        grid = self.grid()
+        rows = parse_line_rows(copy_line(self.ctx.ui, grid, index, measure_rows(self.ctx.ui, self.ctx.ocr, grid)))
         if len(rows) != 1:
             raise NeedsReview("line_not_read", {"position": str(index + 1)})
         return rows[0]
@@ -87,6 +88,7 @@ class DocumentEditor:
         if self._columns is None:
             self._columns = column_centres(self.ctx.ui, self.ctx.ocr, grid, (QTY, UNIT_PRICE, DISCOUNT))
         current = self.line(index)
+        measured = measure_rows(self.ctx.ui, self.ctx.ocr, grid)
         if current.sku != line.sku:
             raise NeedsReview("line_mismatch", {"position": str(index + 1), "field": "sku"})
         wanted = (
@@ -96,7 +98,7 @@ class DocumentEditor:
         )
         for column, have, want, typed in wanted:
             if have != want:
-                edit_cell(self.ctx.ui, grid, x=self._columns[column], index=index, text=typed)
+                edit_cell(self.ctx.ui, grid, x=self._columns[column], index=index, text=typed, rows=measured)
                 self.ctx.wb.check_errors()
         row = self.line(index)
         check_line(row, line, position=index + 1)

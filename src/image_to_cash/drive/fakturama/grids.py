@@ -11,7 +11,9 @@ What the live app taught (docs/spike-macos-ax.md):
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from statistics import median
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -40,8 +42,58 @@ def grid_at(ui: UiBackend, x: float, y: float, what: str) -> Element:
     return grid
 
 
-def row_y(layout: Layout, grid: Element, index: int) -> float:
-    return grid.rect.y + layout.first_row_dy + index * layout.row_height
+LINE_GAP = 0.4  # of a row: OCR boxes closer in height than this belong to one text line
+PLAUSIBLE_PITCH = (0.5, 2.0)  # a measured pitch outside this share of the layout's is noise
+
+
+@dataclass(frozen=True)
+class Rows:
+    """Where a grid's rows lie: from its top edge to the first row's middle, and row to row."""
+
+    first_dy: float
+    pitch: float
+
+    @classmethod
+    def assumed(cls, layout: Layout) -> Rows:
+        return cls(layout.first_row_dy, layout.row_height)
+
+
+def row_y(layout: Layout, grid: Element, index: int, rows: Rows | None = None) -> float:
+    rows = rows or Rows.assumed(layout)
+    return grid.rect.y + rows.first_dy + index * rows.pitch
+
+
+def measure_rows(ui: UiBackend, ocr: OcrEngine, grid: Element) -> Rows:
+    """The rows as the grid draws them, from OCR's text lines; the layout's values where the grid
+    shows too little (one row gives its place, not the pitch)."""
+    with TemporaryDirectory() as scratch:
+        shot = ui.capture(grid.rect, Path(scratch) / "grid.png")
+        with Image.open(shot) as image:
+            scale = image.height / grid.rect.height
+            boxes = ocr.recognize(image.convert("RGB"))
+    return rows_from_text(tuple((box.box.y + box.box.height / 2) / scale for box in boxes), ui.layout)
+
+
+def rows_from_text(centres: Sequence[float], layout: Layout) -> Rows:
+    """`centres`: each OCR box's middle, from the grid's top edge. The line above the layout's
+    header height is the column header; the lines below it are rows."""
+    assumed = Rows.assumed(layout)
+    lines: list[list[float]] = []
+    for centre in sorted(centres):
+        if lines and centre - lines[-1][-1] < assumed.pitch * LINE_GAP:
+            lines[-1].append(centre)
+        else:
+            lines.append([centre])
+    rows = [sum(line) / len(line) for line in lines if sum(line) / len(line) > layout.header_height]
+    if not rows:
+        return assumed
+    gaps = [later - earlier for earlier, later in zip(rows, rows[1:], strict=False)]
+    pitch = median(gaps) if gaps else assumed.pitch
+    low, high = PLAUSIBLE_PITCH
+    if not low * assumed.pitch <= pitch <= high * assumed.pitch:
+        pitch = assumed.pitch
+    first = rows[0] if rows[0] < layout.header_height + pitch else assumed.first_dy  # an empty first row
+    return Rows(first, pitch)
 
 
 def has_rows(ui: UiBackend, ocr: OcrEngine, grid: Element) -> bool:
@@ -83,9 +135,9 @@ def select_row(ui: UiBackend, grid: Element, index: int, rows: int, *, x_offset:
     return ui.copy_selection()
 
 
-def copy_line(ui: UiBackend, grid: Element, index: int) -> str:
+def copy_line(ui: UiBackend, grid: Element, index: int, rows: Rows | None = None) -> str:
     """One whole row of the order items grid, selected by its row header."""
-    ui.click(grid, at=(grid.rect.x + ui.layout.row_header_dx, row_y(ui.layout, grid, index)))
+    ui.click(grid, at=(grid.rect.x + ui.layout.row_header_dx, row_y(ui.layout, grid, index, rows)))
     return ui.copy_selection()
 
 
@@ -106,14 +158,14 @@ def column_centres(ui: UiBackend, ocr: OcrEngine, grid: Element, names: tuple[st
     return centres
 
 
-def edit_cell(ui: UiBackend, grid: Element, *, x: float, index: int, text: str) -> None:
+def edit_cell(ui: UiBackend, grid: Element, *, x: float, index: int, text: str, rows: Rows | None = None) -> None:
     """Type `text` into one cell and commit it with Return."""
 
     def editor_open() -> bool:
         focused = ui.focused()
         return focused is not None and focused.role is Role.TEXT_FIELD and grid.rect.contains(focused.rect)
 
-    ui.click(grid, at=(x, row_y(ui.layout, grid, index)))
+    ui.click(grid, at=(x, row_y(ui.layout, grid, index, rows)))
     if editor_open():  # the cell was already selected, so the click opened its editor
         ui.key("primary+a")
         ui.type_text(text)
