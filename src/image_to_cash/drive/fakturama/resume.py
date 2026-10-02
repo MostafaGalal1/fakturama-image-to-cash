@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from image_to_cash.drive.fakturama.context import Context
 from image_to_cash.drive.fakturama.copied import DocumentRow, DocumentState, parse_document_rows
+from image_to_cash.drive.fakturama.invoice import INVOICES, ORDERS
 from image_to_cash.drive.fakturama.lists import open_row, search_view
 from image_to_cash.drive.fakturama.order import OrderEditor
 from image_to_cash.errors import NeedsReview
@@ -35,17 +36,21 @@ class Earlier:
 
 
 def find_earlier(ctx: Context, order: NormalizedOrder) -> Earlier:
-    return decide_earlier(search_view(ctx, DOCUMENTS_MENU, order.external_reference, parse_document_rows), order)
+    """Invoices first: the Orders search stays on screen for reopen_order."""
+    reference = order.external_reference
+    invoices = search_view(ctx, DOCUMENTS_MENU, reference, parse_document_rows, category=INVOICES)
+    orders = search_view(ctx, DOCUMENTS_MENU, reference, parse_document_rows, category=ORDERS)
+    return decide_earlier(orders, invoices, order)
 
 
-def decide_earlier(rows: Sequence[DocumentRow], order: NormalizedOrder) -> Earlier:
-    mine = [(index, row) for index, row in enumerate(rows) if row.reference == order.external_reference]
-    if not mine:
+def decide_earlier(order_rows: Sequence[DocumentRow], invoice_rows: Sequence[DocumentRow], order: NormalizedOrder) -> Earlier:
+    reference = order.external_reference
+    orders = [(index, row) for index, row in enumerate(order_rows) if row.reference == reference]
+    invoices = [row for row in invoice_rows if row.reference == reference]
+    if not orders and not invoices:
         return Earlier()
-    orders = [(index, row) for index, row in mine if row.kind == "ORDER"]
-    invoices = [row for _, row in mine if row.kind == "INVOICE"]
-    if len(orders) != 1 or len(invoices) > 1 or len(orders) + len(invoices) != len(mine):
-        raise NeedsReview("already_entered", {"reference": order.external_reference, "documents": str(len(mine))})
+    if len(orders) != 1 or len(invoices) > 1 or any(row.kind != "ORDER" for _, row in orders) or any(row.kind != "INVOICE" for row in invoices):
+        raise NeedsReview("already_entered", {"reference": reference, "documents": str(len(orders) + len(invoices))})
     index, saved = orders[0]
     _require(saved, DocumentState.OPEN, order)
     if not invoices:

@@ -74,22 +74,29 @@ def _with_value_field(found):
     return row, paid
 
 
-def documents(ctx: Context, reference: str, number: str) -> tuple[DocumentRow, ...]:
-    """The Documents rows for `reference`, searched again while `number` is not among them yet."""
-    return search_until(ctx, DOCUMENTS_MENU, reference, parse_document_rows, lambda rows: any(row.number == number for row in rows))
+ORDERS, INVOICES = "Orders", "Invoices"  # Documents' categories
+
+
+def documents(ctx: Context, reference: str, number: str, category: str) -> tuple[DocumentRow, ...]:
+    """The Documents rows of `category` for `reference`, searched again while `number` is not
+    among them yet."""
+    return search_until(
+        ctx, DOCUMENTS_MENU, reference, parse_document_rows, lambda rows: any(row.number == number for row in rows), category=category
+    )
 
 
 def check_order_listed(ctx: Context, order: NormalizedOrder, number: str) -> None:
-    rows = documents(ctx, order.external_reference, number)
+    rows = documents(ctx, order.external_reference, number, ORDERS)
     check_document(rows, number=number, kind="ORDER", reference=order.external_reference, state=DocumentState.OPEN, total=order.totals.gross)
     ctx.wb.shot("documents-order")
     ctx.record("order_listed", Outcome.CHECKED, number=number, state="open")
 
 
 def check_invoice_listed(ctx: Context, order: NormalizedOrder, order_number: str, invoice_number: str) -> None:
-    rows = documents(ctx, order.external_reference, invoice_number)
     state = DocumentState.PAID if order.payment.status is PaidStatus.PAID else DocumentState.UNPAID
-    check_document(rows, number=invoice_number, kind="INVOICE", reference=order.external_reference, state=state, total=order.totals.gross)
-    check_document(rows, number=order_number, kind="ORDER", reference=order.external_reference, state=DocumentState.OPEN, total=order.totals.gross)
+    invoices = documents(ctx, order.external_reference, invoice_number, INVOICES)
+    check_document(invoices, number=invoice_number, kind="INVOICE", reference=order.external_reference, state=state, total=order.totals.gross)
+    orders = documents(ctx, order.external_reference, order_number, ORDERS)
+    check_document(orders, number=order_number, kind="ORDER", reference=order.external_reference, state=DocumentState.OPEN, total=order.totals.gross)
     ctx.wb.shot("documents-final")
     ctx.record("invoice_listed", Outcome.CHECKED, number=invoice_number, state=state.name.lower())

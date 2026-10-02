@@ -28,30 +28,30 @@ OTHER = row("ORDER", "PO000009", DocumentState.OPEN, reference="WEB-2026-0714-A1
 
 
 def test_nothing_saved_starts_fresh(order):
-    earlier = decide_earlier((OTHER,), order)
+    earlier = decide_earlier((OTHER,), (), order)
     assert earlier.order is None and earlier.invoice is None
 
 
 def test_a_saved_order_without_invoice_resumes_at_the_invoice(order):
-    earlier = decide_earlier((OTHER, ORDER), order)
+    earlier = decide_earlier((OTHER, ORDER), (), order)
     assert earlier.order == ORDER and earlier.invoice is None and earlier.order_row == 1
 
 
 def test_order_and_paid_invoice_mean_already_entered(order):
-    earlier = decide_earlier((ORDER, INVOICE), order)
+    earlier = decide_earlier((ORDER,), (INVOICE,), order)
     assert (earlier.order, earlier.invoice) == (ORDER, INVOICE)
 
 
 @pytest.mark.parametrize(
-    ("rows", "reason"),
+    ("rows", "invoices", "reason"),
     [
-        ((ORDER, row("ORDER", "PO000003", DocumentState.OPEN)), "already_entered"),
-        ((INVOICE,), "already_entered"),
-        ((ORDER, row("INVOICE", "INV000002", DocumentState.UNPAID)), "already_entered_differently"),
-        ((row("ORDER", "PO000002", DocumentState.OPEN, total="700.00"),), "already_entered_differently"),
+        ((ORDER, row("ORDER", "PO000003", DocumentState.OPEN)), (), "already_entered"),
+        ((), (INVOICE,), "already_entered"),
+        ((ORDER,), (row("INVOICE", "INV000002", DocumentState.UNPAID),), "already_entered_differently"),
+        ((row("ORDER", "PO000002", DocumentState.OPEN, total="700.00"),), (), "already_entered_differently"),
     ],
 )
-def test_anything_else_goes_to_a_person(order, rows, reason):
+def test_anything_else_goes_to_a_person(order, rows, invoices, reason):
     with pytest.raises(NeedsReview) as stop:
-        decide_earlier(rows, order)
+        decide_earlier(rows, invoices, order)
     assert stop.value.reason == reason

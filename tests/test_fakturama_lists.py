@@ -9,7 +9,7 @@ class Results:
         self.answers = list(answers)
         self.searches = 0
 
-    def __call__(self, ctx, menu, text, parse):
+    def __call__(self, ctx, menu, text, parse, category=None):
         self.searches += 1
         return self.answers.pop(0)
 
