@@ -29,6 +29,9 @@ saving. The database log shows only Fakturama's own bookkeeping: its version, an
 | Outlines (Preferences page list) | Setting the outline's `AXSelectedRows` to one row switches the page. No mouse event is needed. |
 | Grids (NatTable) | `AXScrollArea` with no children. **But Cmd+C copies the selected rows to the clipboard, tab-separated.** List views give clean values, e.g. `true	Tax-free	Free of Tax	0.0`. The order's items grid gives some cells as Java `toString()` dumps, e.g. VAT. Cmd+A then Cmd+C selects and copies all. So grids are read through the clipboard (saved and restored around the copy), with OCR on the grid frame as the fallback. |
 | Closing editors | Cmd+W did nothing (focus). **File → Close All** asks with one "Save Parts" dialog per dirty editor. Untick, verify, then OK discards it. **OK with the box ticked saves.** |
+| "Save Parts" checkbox | `AXPress` toggles it but returns `kAXErrorActionUnsupported` (-25205), although the box lists `AXPress` among its actions. The adapter accepts that code only when the element advertises the action, and the caller confirms by reading the value back. The table lists each cell under its row and again under its column, so the tree is de-duplicated by role and frame. |
+| Hit-test scan cost | About 6–7 s for one editor (1197×416 pt at a 20×8 pt step). Scan once per screen, then refresh only the elements in use. |
+| Screenshots | A **screen-region** capture records whatever covers the region: one test capture recorded another app's window. Capture **Fakturama's own window** (`screencapture -l <window id>`), then crop. That records Fakturama's pixels even while it is covered. |
 
 ## Editors seen
 
@@ -47,6 +50,12 @@ saving. The database log shows only Fakturama's own bookkeeping: its version, an
   - Fields: Item Number, Name, Category, GTIN, Description and **Price (gross)**, which matches the `gross_price` Stage 1 already computes.
   - VAT pop-up (default `Free of Tax`), and Stock.
 - **Invoice:** a `paid` checkbox. Ticking it reveals "at" (the payment date) and "Value" (the paid amount). Next to it is the payment-method pop-up (only `Pay Cash`), Due Days and Pay Until.
+- **VAT (New → New VAT):** Name, Category, Description, VAT code (E-Invoice) pop-up (default `S (Standard rate)`), and Value (`0%`). The editor opens already marked dirty (`*New TAX Rate`).
+- **Term of payment (New → New Term of Payment):**
+  - Fields: Name, Account, Description, a payment-code pop-up (default "Mutually defined"), Cash discount, Discount Days and Net Days.
+  - Text areas for the unpaid, deposit and paid texts.
+- **Snapshots:** blank VAT, payment, product, debtor and order editors are recorded in
+  `tests/fixtures/ax/`. The locator tests run against them.
 
 ## Consequences for Plan 2
 
@@ -78,3 +87,7 @@ saving. The database log shows only Fakturama's own bookkeeping: its version, an
 - The "Select the address" and product pickers with real rows: search, select, OK.
 - Saving: the first real save of a VAT, payment method, debtor, product, order and invoice belongs to the end-to-end run, against a restorable database copy.
 - Number entry under the `de/DE` currency locale: whether price fields expect `199,00` or accept `199.00`.
+  (Display is confirmed: price fields show `0,00 €` without a restart.)
+- The order editor's total values (Total Gross, VAT, Total): their labels were found, but no value
+  element appeared in the scan.
+- The payment-code pop-up's options, for "Bank Transfer".
