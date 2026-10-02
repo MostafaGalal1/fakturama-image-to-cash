@@ -18,6 +18,9 @@ class FakeBackend:
         self._typed = ""
         self._values: dict[Rect, str | None] = {}
 
+    def bring_to_front(self) -> None:
+        self.calls.append(("front", None))
+
     def windows(self) -> tuple[Window, ...]:
         return ()
 

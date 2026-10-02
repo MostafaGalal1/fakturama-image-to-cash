@@ -4,8 +4,9 @@ Built on docs/spike-macos-ax.md:
 - SWT tab folders hide their contents from AXChildren, so `scan` hit-tests a grid of points.
 - Text is entered by clicking, typing CGEvent keystrokes and reading the value back. Setting
   AXValue directly only changes the display: Fakturama would not save it, so it is never used.
-- Input events are posted only while Fakturama is frontmost (see safety.py), and a click only
-  when Fakturama's own element is under the pointer.
+- Input events are posted only while Fakturama holds the keyboard focus and the front window
+  (see safety.py), a click only when the target itself is under the pointer, and typing only while
+  the clicked field still has the focus.
 """
 
 from __future__ import annotations
@@ -18,27 +19,32 @@ from pathlib import Path
 
 import ApplicationServices as AX
 import Quartz
-from AppKit import NSPasteboard, NSPasteboardItem, NSRunningApplication, NSWorkspace
+from AppKit import NSPasteboard, NSPasteboardItem, NSRunningApplication
 from PIL import Image
 
-from image_to_cash.drive.backend.ax_roles import element_from_record
+from image_to_cash.drive.backend.ax_roles import AX_ROLES, element_from_record
 from image_to_cash.drive.backend.base import BackendError, UnsafeToAct
 from image_to_cash.drive.backend.keys import MAC_KEY_CODES, parse_chord
-from image_to_cash.drive.backend.safety import require_frontmost, wait_until_frontmost
-from image_to_cash.drive.backend.window_capture import WindowInfo, crop_box, window_for
+from image_to_cash.drive.backend.safety import is_within, require_copied_text, require_keyboard, wait_until_frontmost
+from image_to_cash.drive.backend.window_capture import NORMAL_WINDOW_LAYER, WindowInfo, crop_box, window_for
 from image_to_cash.drive.elements import Element, Rect, Window, distinct
+from image_to_cash.drive.waits import WaitTimeout, wait_until
 
 BUNDLE_ID = "Fakturama.ID"
 AX_SUCCESS = 0
 AX_ACTION_UNSUPPORTED = -25205  # kAXErrorActionUnsupported
-SCAN_STEP_X, SCAN_STEP_Y = 20.0, 8.0  # finer than the smallest control (14 pt tall, 16 pt wide)
+SCAN_STEP_X, SCAN_STEP_Y = 12.0, 8.0  # finer than the smallest control (14 pt tall, 14 pt wide)
 CONTAINER_ROLES = frozenset({"AXGroup", "AXScrollArea", "AXUnknown", "AXTabGroup", "AXSplitGroup"})
+LEAF_ROLES = frozenset(AX_ROLES) - {"AXTabGroup", "AXWindow"}  # controls with nothing inside them
 TREE_DEPTH = 12
 EVENT_PAUSE_SECONDS = 0.02
 TYPE_PAUSE_SECONDS = 0.01
 MENU_OPEN_SECONDS = 0.5
 CLIPBOARD_TIMEOUT_SECONDS = 2.0
 CLIPBOARD_POLL_SECONDS = 0.05
+CLICK_SETTLE_SECONDS = 1.5  # a window raised a moment ago may still be under another one
+CAPTURE_TIMEOUT_SECONDS = 30
+FOCUS_MOVING_KEYS = frozenset({"tab", "return", "escape"})
 MODIFIER_FLAGS = {
     "primary": Quartz.kCGEventFlagMaskCommand,
     "shift": Quartz.kCGEventFlagMaskShift,
@@ -51,6 +57,8 @@ class MacAxBackend:
     def __init__(self, pid: int) -> None:
         self._pid = pid
         self._app = AX.AXUIElementCreateApplication(pid)
+        self._system = AX.AXUIElementCreateSystemWide()
+        self._clicked: object | None = None  # the field that should hold keyboard focus for typing
 
     @classmethod
     def attach(cls) -> MacAxBackend:
@@ -66,12 +74,14 @@ class MacAxBackend:
     def bring_to_front(self) -> None:
         """Called once, at the start of a run; afterwards losing the front stops the run."""
         self._set(self._app, "AXFrontmost", True)
-        wait_until_frontmost(self._pid, _frontmost_pid, sleep=time.sleep)
+        wait_until_frontmost(self._pid, self._active_pid, sleep=time.sleep)
+        wait_until_frontmost(self._pid, _front_window_pid, sleep=time.sleep)
+        self._guard()
 
     # Accessibility only: safe while someone else uses the Mac.
 
     def windows(self) -> tuple[Window, ...]:
-        handles = self._attr(self._app, "AXWindows") or ()
+        handles = [h for h in self._attr(self._app, "AXWindows") or () if self._has_frame(h)]
         return tuple(Window(str(self._attr(h, "AXTitle") or ""), self._rect(h), h) for h in handles)
 
     def press_menu(self, path: Sequence[str]) -> None:
@@ -93,9 +103,13 @@ class MacAxBackend:
             while x < area.right:
                 handle = self._hit(self._app, x, y)
                 role = self._attr(handle, "AXRole") if handle is not None else None
-                if role is not None and role not in CONTAINER_ROLES:
-                    found.setdefault((str(role), self._rect(handle).rounded()), handle)  # read the rest once
-                x += SCAN_STEP_X
+                step = SCAN_STEP_X
+                if role is not None and role not in CONTAINER_ROLES and self._has_frame(handle):
+                    rect = self._rect(handle)
+                    found.setdefault((str(role), rect.rounded()), handle)  # read the rest once
+                    if role in LEAF_ROLES:  # nothing else to find inside this control
+                        step = max(step, rect.right - x)
+                x += step
             y += SCAN_STEP_Y
         elements = (self._element(handle) for handle in found.values())
         return tuple(sorted(elements, key=lambda e: (e.rect.y, e.rect.x)))
@@ -107,20 +121,25 @@ class MacAxBackend:
         self._perform(_handle(element), "AXPress")
 
     def choose(self, popup: Element, option: str) -> None:
+        """Opens a menu over the screen, so it needs Fakturama in front like any input."""
         handle = _handle(popup)
+        self._guard()
         self._perform(handle, "AXPress")
-        time.sleep(MENU_OPEN_SECONDS)
-        menus = [m for m in self._attr(handle, "AXChildren") or () if self._attr(m, "AXRole") == "AXMenu"]
-        items = [item for menu in menus for item in self._attr(menu, "AXChildren") or ()]
-        matches = [item for item in items if self._attr(item, "AXTitle") == option]
-        if len(matches) != 1:
+        menus = wait_until(lambda: self._menus(handle), what="the pop-up menu", timeout=MENU_OPEN_SECONDS * 4)
+        try:
+            items = [item for menu in menus for item in self._attr(menu, "AXChildren") or ()]
+            matches = [item for item in items if self._attr(item, "AXTitle") == option]
+            if len(matches) != 1:
+                raise BackendError(f"pop-up has {len(matches)} options titled {option!r}")
+            self._perform(matches[0], "AXPress")
+        except BaseException:
             for menu in menus:
-                AX.AXUIElementPerformAction(menu, "AXCancel")
-            raise BackendError(f"pop-up has {len(matches)} options titled {option!r}")
-        self._perform(matches[0], "AXPress")
-        chosen = self.refresh(popup).value
-        if chosen != option:
-            raise BackendError(f"pop-up shows {chosen!r} after choosing {option!r}")
+                AX.AXUIElementPerformAction(menu, "AXCancel")  # never leave a menu holding the keyboard
+            raise
+        try:
+            wait_until(lambda: self.refresh(popup).value == option, what=f"the pop-up to show {option!r}", timeout=2)
+        except WaitTimeout:
+            raise BackendError(f"pop-up shows {self.refresh(popup).value!r} after choosing {option!r}") from None
 
     def capture(self, area: Rect, path: Path) -> Path:
         """Fakturama's own pixels only: the window holding `area` is captured, then cropped."""
@@ -132,30 +151,38 @@ class MacAxBackend:
         with tempfile.TemporaryDirectory() as scratch:
             whole = Path(scratch) / "window.png"
             command = ["screencapture", "-x", "-o", f"-l{window.window_id}", str(whole)]
-            result = subprocess.run(command, capture_output=True, text=True)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=CAPTURE_TIMEOUT_SECONDS)
             if result.returncode != 0 or not whole.is_file():
                 raise BackendError(f"window capture failed (Screen Recording permission?): {result.stderr.strip()}")
             with Image.open(whole) as image:
                 image.crop(crop_box(window.bounds, area, image.width)).save(path)
         return path
 
-    # Input events: only while Fakturama is frontmost.
+    # Input: only while Fakturama holds the keyboard and the front window.
 
     def click(self, element: Element) -> None:
-        x, y = element.rect.center
-        self._require_on_top(x, y)
+        """Clicks the control's current centre, only once the control itself is under the pointer."""
+        handle = _handle(element)
+        x, y = self._rect(handle).center
+        try:
+            wait_until(lambda: self._on_top(handle, x, y), what="the target to be on top", timeout=CLICK_SETTLE_SECONDS, poll=0.1)
+        except WaitTimeout:
+            raise UnsafeToAct(f"something else covers the target at ({x:.0f}, {y:.0f}); refusing to click") from None
+        self._guard()
         for kind in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
             Quartz.CGEventPost(
                 Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, kind, (x, y), Quartz.kCGMouseButtonLeft)
             )
             time.sleep(EVENT_PAUSE_SECONDS)
+        self._clicked = handle
 
     def type_text(self, text: str) -> None:
         for char in text:
-            self._guard()
+            self._guard_typing()
             units = len(char.encode("utf-16-le")) // 2
             for down in (True, False):
                 event = Quartz.CGEventCreateKeyboardEvent(None, 0, down)
+                Quartz.CGEventSetFlags(event, 0)  # no modifier still held from an earlier chord
                 Quartz.CGEventKeyboardSetUnicodeString(event, units, char)
                 Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
             time.sleep(TYPE_PAUSE_SECONDS)
@@ -171,6 +198,8 @@ class MacAxBackend:
             Quartz.CGEventSetFlags(event, flags)
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
             time.sleep(EVENT_PAUSE_SECONDS)
+        if parsed.key in FOCUS_MOVING_KEYS:
+            self._clicked = None
 
     def copy_selection(self) -> str:
         board = NSPasteboard.generalPasteboard()
@@ -178,26 +207,60 @@ class MacAxBackend:
         try:
             before = board.changeCount()
             self.key("primary+c")
-            deadline = time.monotonic() + CLIPBOARD_TIMEOUT_SECONDS
-            while board.changeCount() == before:
-                if time.monotonic() > deadline:
-                    raise BackendError("nothing was copied: is a row selected?")
-                time.sleep(CLIPBOARD_POLL_SECONDS)
-            return str(board.stringForType_("public.utf8-plain-text") or "")
-        finally:
-            _restore_clipboard(board, saved)
+            wait_until(
+                lambda: board.changeCount() != before,
+                what="the copy to reach the clipboard",
+                timeout=CLIPBOARD_TIMEOUT_SECONDS,
+                poll=CLIPBOARD_POLL_SECONDS,
+            )
+            self._guard()  # still Fakturama's copy, not something a person copied meanwhile
+            copied = require_copied_text(board.stringForType_("public.utf8-plain-text"))
+        except BaseException:
+            _restore_clipboard(board, saved)  # best effort: the copy's own error matters more
+            raise
+        if not _restore_clipboard(board, saved):
+            raise BackendError("copied the grid, but could not restore the clipboard")
+        return str(copied)
 
     # Helpers.
 
     def _guard(self) -> None:
-        require_frontmost(self._pid, _frontmost_pid())
+        require_keyboard(
+            self._pid,
+            app_is_active=self._attr(self._app, "AXFrontmost") is True,
+            front_window_pid=_front_window_pid(),
+            focused_app_pid=self._focused_app_pid(),
+        )
 
-    def _require_on_top(self, x: float, y: float) -> None:
+    def _guard_typing(self) -> None:
+        """Typing also needs the clicked field to still hold the keyboard focus."""
         self._guard()
-        top = self._hit(AX.AXUIElementCreateSystemWide(), x, y)
-        error, owner = AX.AXUIElementGetPid(top, None) if top is not None else (1, None)
-        if error != AX_SUCCESS or owner != self._pid:
-            raise UnsafeToAct(f"something else covers the target at ({x:.0f}, {y:.0f}); refusing to click")
+        if self._clicked is None:
+            return
+        focused = self._attr(self._app, "AXFocusedUIElement")
+        if not is_within(focused, self._clicked, lambda e: self._attr(e, "AXParent")):
+            raise UnsafeToAct("keyboard focus moved away from the field that was clicked; refusing to type")
+
+    def _on_top(self, handle: object, x: float, y: float) -> bool:
+        return is_within(self._hit(self._system, x, y), handle, lambda e: self._attr(e, "AXParent"))
+
+    def _focused_app_pid(self) -> int | None:
+        """The system's answer to "who holds the keyboard focus", or None when it cannot say:
+        on this Mac the query often fails ("cannot complete") after a burst of accessibility calls."""
+        app = self._attr(self._system, "AXFocusedApplication")
+        if app is None:
+            return None
+        error, pid = AX.AXUIElementGetPid(app, None)
+        return int(pid) if error == AX_SUCCESS else None
+
+    def _active_pid(self) -> int | None:
+        return self._pid if self._attr(self._app, "AXFrontmost") is True else None
+
+    def _menus(self, handle: object) -> list[object]:
+        return [m for m in self._attr(handle, "AXChildren") or () if self._attr(m, "AXRole") == "AXMenu"]
+
+    def _has_frame(self, handle: object) -> bool:
+        return self._attr(handle, "AXPosition") is not None and self._attr(handle, "AXSize") is not None
 
     @staticmethod
     def _window_infos() -> tuple[WindowInfo, ...]:
@@ -229,7 +292,7 @@ class MacAxBackend:
         return matches[0]
 
     def _walk(self, handle: object, depth: int, found: list[Element]) -> None:
-        if self._attr(handle, "AXPosition") is not None:
+        if self._has_frame(handle):
             found.append(self._element(handle))
         if depth < TREE_DEPTH:
             for child in self._attr(handle, "AXChildren") or ():
@@ -284,9 +347,14 @@ class MacAxBackend:
         return handle if error == AX_SUCCESS else None
 
 
-def _frontmost_pid() -> int | None:
-    app = NSWorkspace.sharedWorkspace().frontmostApplication()
-    return None if app is None else int(app.processIdentifier())
+def _front_window_pid() -> int | None:
+    """Owner of the frontmost normal window, live from the window server (NSWorkspace's answer
+    can be stale in a process without a run loop)."""
+    options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
+    for info in Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or ():
+        if int(info["kCGWindowLayer"]) == NORMAL_WINDOW_LAYER:
+            return int(info["kCGWindowOwnerPID"])
+    return None
 
 
 def _handle(element: Element) -> object:
@@ -304,7 +372,7 @@ def _save_clipboard(board: NSPasteboard) -> list[dict[str, object]]:
     return [{kind: item.dataForType_(kind) for kind in item.types()} for item in board.pasteboardItems() or ()]
 
 
-def _restore_clipboard(board: NSPasteboard, saved: list[dict[str, object]]) -> None:
+def _restore_clipboard(board: NSPasteboard, saved: list[dict[str, object]]) -> bool:
     board.clearContents()
     items = []
     for kinds in saved:
@@ -313,5 +381,4 @@ def _restore_clipboard(board: NSPasteboard, saved: list[dict[str, object]]) -> N
             if data is not None:
                 item.setData_forType_(data, kind)
         items.append(item)
-    if items:
-        board.writeObjects_(items)
+    return bool(board.writeObjects_(items)) if items else True

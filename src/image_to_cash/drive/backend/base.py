@@ -1,10 +1,12 @@
 """The UI backend contract every OS adapter implements (design §3, §5).
 
 Two kinds of operation:
-- Accessibility only (`windows`, `press_menu`, `tree`, `scan`, `refresh`, `press`, `choose`): no
-  mouse or keyboard events, so they cannot reach another app.
-- Input events (`click`, `type_text`, `key`, `copy_selection`): sent only while Fakturama is the
-  frontmost app, checked before every event; otherwise they raise UnsafeToAct.
+- Accessibility only (`windows`, `press_menu`, `tree`, `scan`, `refresh`, `press`): no mouse or
+  keyboard events, so they cannot reach another app.
+- Input (`click`, `type_text`, `key`, `copy_selection`, and `choose`, whose menu opens over the
+  screen): only while Fakturama holds the keyboard focus and the front window, checked before
+  every event; a click only when the target itself is under the pointer; otherwise UnsafeToAct.
+- `bring_to_front` is called once, at the start of a run.
 """
 
 from __future__ import annotations
@@ -25,6 +27,10 @@ class UnsafeToAct(BackendError):
 
 
 class UiBackend(Protocol):
+    def bring_to_front(self) -> None:
+        """Activate Fakturama; afterwards losing the front stops the run instead of re-activating."""
+        ...
+
     def windows(self) -> tuple[Window, ...]:
         """Fakturama's top-level windows, dialogs included."""
         ...

@@ -1,8 +1,14 @@
 import pytest
 
-from image_to_cash.drive.backend.base import UnsafeToAct
+from image_to_cash.drive.backend.base import BackendError, UnsafeToAct
 from image_to_cash.drive.backend.keys import MAC_KEY_CODES, Chord, parse_chord
-from image_to_cash.drive.backend.safety import require_frontmost, wait_until_frontmost
+from image_to_cash.drive.backend.safety import (
+    is_within,
+    require_copied_text,
+    require_frontmost,
+    require_keyboard,
+    wait_until_frontmost,
+)
 
 FAKTURAMA = 2386
 
@@ -60,3 +66,38 @@ def test_gives_up_when_fakturama_never_comes_to_the_front():
     with pytest.raises(UnsafeToAct):
         wait_until_frontmost(FAKTURAMA, lambda: 77, sleep=clock.sleep, timeout=1.0, poll=0.25)
     assert clock.slept == pytest.approx(1.0)
+
+
+def test_keyboard_input_needs_fakturama_active_and_owning_the_front_window():
+    require_keyboard(FAKTURAMA, app_is_active=True, front_window_pid=FAKTURAMA, focused_app_pid=FAKTURAMA)
+    with pytest.raises(UnsafeToAct, match="Fakturama is not the active app"):
+        require_keyboard(FAKTURAMA, app_is_active=False, front_window_pid=FAKTURAMA, focused_app_pid=None)
+    with pytest.raises(UnsafeToAct, match="front window is held by nothing"):
+        require_keyboard(FAKTURAMA, app_is_active=True, front_window_pid=None, focused_app_pid=None)
+
+
+def test_an_answered_focus_query_naming_another_app_stops_input():
+    with pytest.raises(UnsafeToAct, match="keyboard focus is held by pid 77"):
+        require_keyboard(FAKTURAMA, app_is_active=True, front_window_pid=FAKTURAMA, focused_app_pid=77)  # e.g. Spotlight
+
+
+def test_an_unanswered_focus_query_leaves_the_decision_to_the_other_signals():
+    require_keyboard(FAKTURAMA, app_is_active=True, front_window_pid=FAKTURAMA, focused_app_pid=None)
+
+
+PARENTS = {"button": "toolbar", "toolbar": "window", "field": "editor", "editor": "window"}
+
+
+@pytest.mark.parametrize(
+    ("hit", "target", "inside"),
+    [("field", "field", True), ("field", "editor", True), ("button", "field", False), (None, "field", False)],
+)
+def test_click_lands_only_on_the_target_or_its_children(hit, target, inside):
+    assert is_within(hit, target, PARENTS.get) is inside
+
+
+def test_copied_text_must_be_present():
+    assert require_copied_text("true\tTax-free\n") == "true\tTax-free\n"
+    for empty in (None, "", "  \n"):
+        with pytest.raises(BackendError, match="no text was copied"):
+            require_copied_text(empty)
