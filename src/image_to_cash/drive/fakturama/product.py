@@ -10,7 +10,7 @@ from image_to_cash.drive.elements import Element, Role
 from image_to_cash.drive.fakturama.context import Context
 from image_to_cash.drive.fakturama.copied import parse_product_rows
 from image_to_cash.drive.fakturama.fields import choose_option, set_amount, shown
-from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, has_rows, select_row
+from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, has_rows, measure_rows, select_row
 from image_to_cash.drive.fakturama.order import OrderEditor
 from image_to_cash.drive.fakturama.rules import decide_product, vat_name
 from image_to_cash.drive.fakturama import controls as find
@@ -60,11 +60,12 @@ def _pick_row(ctx: Context, controls: tuple[Element, ...], product: Product) -> 
     grid = grids[0]
     if not has_rows(ctx.ui, ctx.ocr, grid):
         return False
-    rows = parse_product_rows(copy_all(ctx.ui, grid))
+    measured = measure_rows(ctx.ui, ctx.ocr, grid)
+    rows = parse_product_rows(copy_all(ctx.ui, grid, rows=measured))
     decision = decide_product(rows, product)
     if decision.creates:
         return False
-    if parse_product_rows(select_row(ctx.ui, grid, decision.index, len(rows))) != (rows[decision.index],):
+    if parse_product_rows(select_row(ctx.ui, grid, decision.index, len(rows), measured=measured)) != (rows[decision.index],):
         raise NeedsReview("selector_row_not_selected", {"selector": SELECTOR})
     ctx.ui.press(by_title(controls, Role.BUTTON, "OK"))
     wait_until(lambda: not ctx.wb.dialog_open(SELECTOR), what="the selector to close", timeout=5)

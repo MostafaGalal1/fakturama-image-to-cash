@@ -18,8 +18,9 @@ def context(dialog_open: bool) -> SimpleNamespace:
 @pytest.fixture
 def grid_with_rows(monkeypatch):
     monkeypatch.setattr(debtor, "has_rows", lambda ui, ocr, grid: True)
+    monkeypatch.setattr(debtor, "measure_rows", lambda ui, ocr, grid: None)
 
-    def copy_all(ui, grid):
+    def copy_all(ui, grid, rows=None):
         raise UnsafeToAct("the control that was clicked has gone; refusing to send keys")
 
     monkeypatch.setattr(debtor, "copy_all", copy_all)

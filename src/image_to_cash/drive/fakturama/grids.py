@@ -118,16 +118,18 @@ def row_drawn(pixels: Image.Image) -> bool:
     return marked > max(MIN_MARKED_PIXELS, pixels.width * pixels.height * MIN_MARKED_SHARE)
 
 
-def copy_all(ui: UiBackend, grid: Element, *, x_offset: float = 150) -> str:
+def copy_all(ui: UiBackend, grid: Element, *, x_offset: float = 150, rows: Rows | None = None) -> str:
     """Every row of a grid that has rows: click into it, select all, copy."""
-    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0)))
+    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0, rows)))
     ui.key("primary+a")
     return ui.copy_selection()
 
 
-def select_row(ui: UiBackend, grid: Element, index: int, rows: int, *, x_offset: float = 150) -> str:
+def select_row(
+    ui: UiBackend, grid: Element, index: int, rows: int, *, x_offset: float = 150, measured: Rows | None = None
+) -> str:
     """Leave exactly row `index` selected and return its copy, for the caller to confirm."""
-    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0)))
+    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0, measured)))
     for _ in range(rows):
         ui.key("up")
     for _ in range(index):

@@ -10,7 +10,7 @@ from image_to_cash.drive.elements import Element, Role
 from image_to_cash.drive.fakturama.context import Context
 from image_to_cash.drive.fakturama.copied import parse_address_rows
 from image_to_cash.drive.fakturama.fields import button_inside, choose_option, percent_holds, shown
-from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, has_rows, select_row
+from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, has_rows, measure_rows, select_row
 from image_to_cash.drive.fakturama.master_data import ensure_payment_method
 from image_to_cash.drive.fakturama.order import OrderEditor
 from image_to_cash.drive.fakturama.rules import address_lines_match, decide_debtor
@@ -55,7 +55,8 @@ def _pick_row(ctx: Context, controls: tuple[Element, ...], debtor: Debtor) -> bo
     if not has_rows(ctx.ui, ctx.ocr, grid):
         return False
     try:
-        rows = parse_address_rows(copy_all(ctx.ui, grid))
+        measured = measure_rows(ctx.ui, ctx.ocr, grid)
+        rows = parse_address_rows(copy_all(ctx.ui, grid, rows=measured))
     except (BackendError, WaitTimeout):  # BackendError covers UnsafeToAct
         if ctx.wb.dialog_open(SELECTOR):
             raise
@@ -63,7 +64,7 @@ def _pick_row(ctx: Context, controls: tuple[Element, ...], debtor: Debtor) -> bo
     decision = decide_debtor(rows, debtor)
     if decision.creates:
         return False
-    picked = parse_address_rows(select_row(ctx.ui, grid, decision.index, len(rows)))
+    picked = parse_address_rows(select_row(ctx.ui, grid, decision.index, len(rows), measured=measured))
     if picked != (rows[decision.index],):
         raise NeedsReview("selector_row_not_selected", {"selector": SELECTOR})
     ctx.wb.shot("debtor-selector")
