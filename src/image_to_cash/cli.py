@@ -19,6 +19,7 @@ from image_to_cash.ocr import ENGINES, OcrError, build_ocr
 from image_to_cash.outputs import ORDER_FILE, clear_results, discard_order, write_order, write_result
 from image_to_cash.readers import READERS, ReaderError, build_reader
 from image_to_cash.readers.base import describe_validation_error
+from image_to_cash.readers.openrouter import DEFAULT_MODEL
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -37,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     extract_cmd.add_argument("image", type=Path)
     extract_cmd.add_argument("--reader", default="fixture", choices=READERS)
     extract_cmd.add_argument("--fixture", type=Path, help="recorded response for --reader fixture")
+    extract_cmd.add_argument(
+        "--model", help=f"OpenRouter model for --reader openrouter (default {DEFAULT_MODEL})"
+    )
     extract_cmd.add_argument("--ocr", default="macos-vision", choices=ENGINES)
     extract_cmd.add_argument(
         "--out", type=Path, default=Path("out"), help="result folder; cleared of order.json and review.json first"
@@ -67,7 +71,7 @@ def _extract(args: argparse.Namespace) -> int:
     clear_results(args.out)  # a failed run must not leave an earlier order for Stage 2
     if not args.image.is_file():
         raise FileNotFoundError(f"image not found or not a file: {args.image}")
-    reader = build_reader(args.reader, fixture=args.fixture)
+    reader = build_reader(args.reader, fixture=args.fixture, model=args.model)
     result = extract(args.image, reader, build_ocr(args.ocr))
     target = write_result(result, args.out)
     if result.needs_review:

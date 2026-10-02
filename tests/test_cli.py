@@ -1,9 +1,12 @@
 import json
 from decimal import Decimal
 
+import httpx
 import pytest
 
 from image_to_cash import cli
+from image_to_cash.readers import OpenRouterReader, ReaderError
+from image_to_cash.readers.openrouter import API_KEY_ENV, DEFAULT_MODEL
 
 
 @pytest.fixture
@@ -181,3 +184,45 @@ def test_broken_json_draft_names_the_file(tmp_path, capsys):
     draft.write_text('{"draft_order": {},}')
     assert cli.main(["approve", str(draft), "--out", str(tmp_path / "ok")]) == cli.EXIT_REVIEW
     assert f"{draft} is not valid JSON" in capsys.readouterr().err
+
+
+def test_openrouter_without_a_key_is_a_clear_error(tmp_path, order_image, monkeypatch, capsys):
+    monkeypatch.delenv(API_KEY_ENV, raising=False)
+    argv = ["extract", str(order_image), "--reader", "openrouter", "--out", str(tmp_path)]
+    assert cli.main(argv) == cli.EXIT_ERROR
+    assert API_KEY_ENV in capsys.readouterr().err
+
+
+def test_extract_passes_the_model_to_the_reader(tmp_path, order_image, monkeypatch):
+    requested = {}
+
+    def build_reader(name, *, fixture=None, model=None):
+        requested.update(name=name, fixture=fixture, model=model)
+        raise ReaderError("stop before reading")
+
+    monkeypatch.setattr(cli, "build_reader", build_reader)
+    argv = ["extract", str(order_image), "--reader", "openrouter", "--model", "vendor/model", "--out", str(tmp_path)]
+    assert cli.main(argv) == cli.EXIT_ERROR
+    assert requested == {"name": "openrouter", "fixture": None, "model": "vendor/model"}
+
+
+def test_extract_with_openrouter_writes_order(
+    tmp_path, order_image, sample_order, monkeypatch, use_ocr, ocr_seeing_everything
+):
+    reply = {"choices": [{"finish_reason": "stop", "message": {"content": sample_order.model_dump_json()}}]}
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=reply))
+    reader = OpenRouterReader("vendor/model", "test-key", transport=transport)
+    monkeypatch.setattr(cli, "build_reader", lambda name, **options: reader)
+    use_ocr(ocr_seeing_everything)
+    argv = ["extract", str(order_image), "--reader", "openrouter", "--out", str(tmp_path)]
+    assert cli.main(argv) == cli.EXIT_OK
+    assert (tmp_path / "order.json").is_file()
+
+
+def test_extract_help_names_the_default_model(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["extract", "--help"])
+    assert exit_info.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "--model" in help_text
+    assert DEFAULT_MODEL in help_text
