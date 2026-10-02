@@ -16,6 +16,12 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
   status, and verification in Data > Documents. Findings: [docs/spike-macos-ax.md](docs/spike-macos-ax.md).
   Re-run green after the later changes (resume check, Documents categories, measured rows): a live
   extraction of the clean image, then Order PO000002 and Invoice INV000002 in about 2.5 minutes.
+  - **Batch on the Mac** (OpenRouter reader, macOS Vision). The clean sample was found already
+    entered (PO000001 and INV000001) and counted as done without a second entry. A copy of it
+    with the reference changed to B17 was read and entered as Order PO000003 and Invoice
+    INV000003, paid and verified, in about 2 minutes. The pixelated copy went to `review/`
+    untouched, because OpenRouter answered "no credit" (HTTP 402) that time.
+  - **Discard on the Mac** closed ten saved editors in 12 seconds.
 - **Checked live in the Windows VM:** a re-run of an entered order stops as already entered; a
   near-duplicate Debtor ("Northstar Office GmbH & Co") and Product (`CHR-ERG-010`) are created
   beside the originals and the exact rows are picked; a reused VAT rate is opened and its code S
@@ -336,7 +342,6 @@ Still open:
 - Grid rows are measured by OCR in the order's lines, the selectors and the lists; a grid with
   too little text falls back to the layout's row height. Every row selection is copied back and
   compared, so a wrong value stops the run instead of picking the wrong row.
-- `discard` is unit-tested for both systems but was checked live on Windows only.
 
 ## Unattended: a folder of orders
 
@@ -399,6 +404,5 @@ the in-process spike.
    `row_header_dx`, and scroll editors so the flow does not depend on the editor's height.
 3. **Windows OCR on table cells:** read each item row again from a zoomed crop when short cells
    are missing, so the clean sample confirms on Windows too and a batch there reaches Fakturama.
-4. **`discard` and `batch` live on macOS** (discard is unit-tested; checked live on Windows only).
-5. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
+4. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
    values, annotated screenshots) for whoever reviews a stopped run.
