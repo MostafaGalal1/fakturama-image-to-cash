@@ -9,7 +9,7 @@ class Results:
         self.answers = list(answers)
         self.searches = 0
 
-    def __call__(self, ctx, menu, text, parse):
+    def __call__(self, ctx, menu, text, parse, category=None):
         self.searches += 1
         return self.answers.pop(0)
 
@@ -43,3 +43,11 @@ def test_a_row_found_at_once_is_not_searched_again(monkeypatch):
     lists.search_until(context(pauses), ("Data", "VATs"), "VAT 19%", str, lambda rows: bool(rows))
     assert search.searches == 1
     assert pauses == []
+
+
+def test_a_tree_line_reads_without_its_expand_arrow():
+    from image_to_cash.drive.fakturama.lists import tree_label
+
+    assert [tree_label(text) for text in ("› Invoices", "> Orders", "Orders", "This transaction")] == [
+        "Invoices", "Orders", "Orders", "This transaction"
+    ]

@@ -71,5 +71,10 @@ def focus_owner(pid: int | None) -> int | None:
 
 def menu_label(raw: str) -> str:
     """A Win32 menu item's text as a person reads it: "&Close All\\tCtrl+Shift+W" -> "Close All"."""
-    text = raw.split("\t", 1)[0]
-    return text.replace("&&", "\0").replace("&", "").replace("\0", "&").strip()
+    return without_mnemonics(raw.split("\t", 1)[0]).strip()
+
+
+def without_mnemonics(raw: str) -> str:
+    """Text as Windows draws it: "&&" shows one "&", and a single "&" only underlines the next
+    letter. Menus and SWT's tabs name themselves with these marks ("GmbH && Co")."""
+    return raw.replace("&&", "\0").replace("&", "").replace("\0", "&")

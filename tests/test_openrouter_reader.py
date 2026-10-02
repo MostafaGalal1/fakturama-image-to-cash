@@ -8,7 +8,7 @@ from PIL import Image
 
 from image_to_cash.readers import ReaderError, build_reader
 from image_to_cash.readers import openrouter
-from image_to_cash.readers.openrouter import API_KEY_ENV, API_URL, DEFAULT_MODEL, OpenRouterReader
+from image_to_cash.readers.openrouter import API_KEY_ENV, API_URL, DEFAULT_MODEL, OpenRouterReader, describe_field
 
 API_KEY = "sk-or-v1-test-key-not-real"
 MODEL = "vendor/vision-model"
@@ -325,3 +325,23 @@ def test_build_reader_rejects_a_fixture_for_openrouter(monkeypatch, sample_order
 def test_build_reader_rejects_a_model_for_the_fixture_reader(sample_order_path):
     with pytest.raises(ValueError, match="--model only applies"):
         build_reader("fixture", fixture=sample_order_path, model=MODEL)
+
+
+def test_reads_one_field_from_a_crop(prepared_image):
+    seen = []
+    reader = serve(seen, json=reply_with('{"value": "CHR-ERG-01"}'))
+    assert reader.read_field(prepared_image, "items[0].sku") == "CHR-ERG-01"
+    body = json.loads(seen[0].content)
+    assert body["messages"][0]["content"].startswith("You read one field")
+    assert body["messages"][1]["content"][0]["text"] == "Field: item line 1: sku."
+
+
+@pytest.mark.parametrize("content", ['{"value": null}', '{"value": ""}', "no json", '["CHR-ERG-01"]'])
+def test_a_field_the_crop_does_not_show_is_a_reader_error(prepared_image, content):
+    with pytest.raises(ReaderError):
+        serve(json=reply_with(content)).read_field(prepared_image, "items[0].sku")
+
+
+def test_field_paths_read_as_words():
+    assert describe_field("items[1].unit_net_price") == "item line 2: unit net price"
+    assert describe_field("delivery_address.zip") == "delivery address: zip"

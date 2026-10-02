@@ -47,3 +47,7 @@ def test_other_controls_keep_their_native_type():
 def test_disabled_and_empty_texts():
     field = element("Edit", enabled=False, help="")
     assert not field.enabled and field.help is None
+
+
+def test_a_tab_named_with_a_doubled_ampersand_reads_as_shown():
+    assert element("TabItem", name="Northstar Office GmbH && Co, Jonas Weber").title == "Northstar Office GmbH & Co, Jonas Weber"

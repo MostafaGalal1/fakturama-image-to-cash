@@ -9,7 +9,7 @@ from image_to_cash.drive.elements import Element, Role
 from image_to_cash.drive.fakturama.context import Context
 from image_to_cash.drive.fakturama.copied import parse_payment_rows, parse_vat_rows
 from image_to_cash.drive.fakturama.fields import percent_holds, shown
-from image_to_cash.drive.fakturama.lists import search_until, search_view, view_button
+from image_to_cash.drive.fakturama.lists import open_row, search_until, search_view, view_button
 from image_to_cash.drive.fakturama.rules import PAYMENT_CODES, STANDARD_RATE_CODE, decide_payment, decide_vat, vat_name
 from image_to_cash.drive.locate import right_of_label
 from image_to_cash.drive.report import Outcome
@@ -23,8 +23,10 @@ PAYMENTS_MENU = ("Data", "terms of payment")
 def ensure_vat(ctx: Context, percent: Decimal) -> None:
     """Brief §3.4-3.6."""
     name = vat_name(percent)
-    if not decide_vat(search_view(ctx, VATS_MENU, name, parse_vat_rows), percent).creates:
-        ctx.record("vat", Outcome.FOUND, name=name)
+    decision = decide_vat(search_view(ctx, VATS_MENU, name, parse_vat_rows), percent)
+    if not decision.creates:
+        _check_reused_vat(ctx, decision.index, name)
+        ctx.record("vat", Outcome.FOUND, name=name, code=STANDARD_RATE_CODE)
         return
     ctx.ui.press(view_button(ctx, "Create a new tax rate"))
     fields = ctx.wb.scan_editor(lambda found: right_of_label(found, "Description"), "the new VAT editor")
@@ -40,6 +42,18 @@ def ensure_vat(ctx: Context, percent: Decimal) -> None:
     if decide_vat(saved, percent).creates:
         raise NeedsReview("vat_not_saved", {"name": name})
     ctx.record("vat", Outcome.CREATED, name=name)
+
+
+def _check_reused_vat(ctx: Context, index: int, name: str) -> None:
+    """Brief §3.5: a reused rate must carry the standard code too. Opens it, reads, closes it."""
+    open_row(ctx, index, "VATs")
+    fields = ctx.wb.scan_editor(lambda found: right_of_label(found, "Description"), "the VAT editor")
+    if shown(ctx.ui, right_of_label(fields, "Name")) != name:
+        raise NeedsReview("vat_row_not_opened", {"name": name})
+    code = shown(ctx.ui, right_of_label(fields, "VAT code (E-Invoice)", role=Role.POPUP))
+    if code != STANDARD_RATE_CODE:
+        raise NeedsReview("vat_code_unexpected", {"code": code})
+    ctx.wb.close_unchanged_editor(name)
 
 
 def ensure_payment_method(ctx: Context, method: PaymentMethod) -> None:

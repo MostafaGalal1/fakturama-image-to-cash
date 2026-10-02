@@ -19,6 +19,7 @@ from image_to_cash.drive.fakturama.invoice import check_copied_from_order, check
 from image_to_cash.drive.fakturama.master_data import ensure_vat
 from image_to_cash.drive.fakturama.order import OrderEditor
 from image_to_cash.drive.fakturama.product import Picked, create_product, select_product
+from image_to_cash.drive.fakturama.resume import find_earlier, reopen_order
 from image_to_cash.drive.fakturama.rules import address_lines_match
 from image_to_cash.drive.fakturama.workbench import Workbench
 from image_to_cash.drive.report import Outcome, RunLog
@@ -58,6 +59,14 @@ def where(error: BaseException) -> str:
 def _run(ctx: Context, order: NormalizedOrder) -> DriveResult:
     ctx.ui.bring_to_front()
     ctx.wb.check_errors()
+    earlier = find_earlier(ctx, order)
+    if earlier.order is not None and earlier.invoice is not None:
+        ctx.record("already_entered", Outcome.FOUND, order=earlier.order.number, invoice=earlier.invoice.number)
+        return DriveResult(earlier.order.number, earlier.invoice.number)
+    if earlier.order is not None:
+        editor = reopen_order(ctx, earlier)
+        ctx.record("order_resumed", Outcome.FOUND, number=earlier.order.number)
+        return _invoice(ctx, editor, order, earlier.order.number)
     editor = OrderEditor.open(ctx, order)
     _resolve_debtor(ctx, editor, order)
     products = {product.sku: product for product in order.products}
@@ -80,6 +89,10 @@ def _run(ctx: Context, order: NormalizedOrder) -> DriveResult:
     order_number = editor.save()
     ctx.record("order_saved", Outcome.DONE, number=order_number)
     check_order_listed(ctx, order, order_number)
+    return _invoice(ctx, editor, order, order_number)
+
+
+def _invoice(ctx: Context, editor: OrderEditor, order: NormalizedOrder, order_number: str) -> DriveResult:
     invoice = editor.follow_up_invoice()
     check_copied_from_order(invoice, order)
     record_payment(invoice, order)

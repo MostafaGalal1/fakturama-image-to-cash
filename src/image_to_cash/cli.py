@@ -58,6 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
     drive_cmd = commands.add_parser("drive", help="enter an approved order.json into the running Fakturama")
     drive_cmd.add_argument("order", type=Path, help="order.json written by extract or approve")
     drive_cmd.add_argument("--out", type=Path, default=Path("out/drive"), help="folder for run.jsonl and screens/")
+    batch_cmd = commands.add_parser("batch", help="extract and drive every order image in a folder, unattended")
+    batch_cmd.add_argument("inbox", type=Path, help="folder of order images; each moves to done/, review/ or stopped/")
+    batch_cmd.add_argument("--reader", default="openrouter", choices=READERS)
+    batch_cmd.add_argument("--fixture", type=Path, help="recorded response for --reader fixture")
+    batch_cmd.add_argument("--model", help=f"OpenRouter model (default {DEFAULT_MODEL})")
+    batch_cmd.add_argument("--ocr", default=DEFAULT_ENGINE, choices=ENGINES)
+    batch_cmd.add_argument("--out", type=Path, default=Path("out/batch"), help="results, one folder per image")
+    batch_cmd.add_argument("--watch", type=float, metavar="SECONDS", help="keep watching the inbox at this interval")
     return parser
 
 
@@ -68,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
             return _extract(args)
         if args.command == "drive":
             return _drive(args)
+        if args.command == "batch":
+            return _batch(args)
         return _approve(args)
     except (ReaderError, OcrError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -145,6 +155,39 @@ def _drive(args: argparse.Namespace) -> int:
         print(f"error: {error}; see {args.out / 'run.jsonl'}", file=sys.stderr)
         return EXIT_ERROR
     print(f"order {result.order_number} and invoice {result.invoice_number} saved and verified; see {args.out}")
+    return EXIT_OK
+
+
+def _batch(args: argparse.Namespace) -> int:
+    from image_to_cash.batch import STOPPED, run_batch
+    from image_to_cash.drive.flow import drive
+    from image_to_cash.drive.preflight import check_currency, load_order
+
+    if not args.inbox.is_dir():
+        raise FileNotFoundError(f"inbox not found or not a folder: {args.inbox}")
+    reader = build_reader(args.reader, fixture=args.fixture, model=args.model)
+    ocr = build_ocr(args.ocr)
+    driver: list[tuple[UiBackend, OcrEngine]] = []  # attached on the first clean order
+
+    def read(image: Path, folder: Path) -> Path | None:
+        clear_results(folder)
+        result = extract(image, reader, ocr)
+        target = write_result(result, folder)
+        return None if result.needs_review else target
+
+    def enter(order_path: Path, folder: Path) -> str:
+        if not driver:
+            check_currency()
+            driver.append(_driver())
+        result = drive(load_order(order_path), *driver[0], folder)
+        return f"order {result.order_number}, invoice {result.invoice_number}"
+
+    outcomes = run_batch(args.inbox, args.out, read, enter, watch=args.watch)
+    for outcome in outcomes:
+        print(f"{outcome.status:8} {outcome.image}: {outcome.detail}")
+    if any(outcome.status == STOPPED for outcome in outcomes):
+        print("batch stopped: finish or discard Fakturama's open editors, then run it again", file=sys.stderr)
+        return EXIT_REVIEW
     return EXIT_OK
 
 

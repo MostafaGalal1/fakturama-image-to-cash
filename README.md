@@ -14,6 +14,13 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
   Order-first flow through the macOS Accessibility API: Order, Debtor (select or create, with its
   payment method), Products (select or create, with their VAT), save, the linked Invoice, the paid
   status, and verification in Data > Documents. Findings: [docs/spike-macos-ax.md](docs/spike-macos-ax.md).
+  Re-run green after the later changes (resume check, Documents categories, measured rows): a live
+  extraction of the clean image, then Order PO000002 and Invoice INV000002 in about 2.5 minutes.
+- **Checked live in the Windows VM:** a re-run of an entered order stops as already entered; a
+  near-duplicate Debtor ("Northstar Office GmbH & Co") and Product (`CHR-ERG-010`) are created
+  beside the originals and the exact rows are picked; a reused VAT rate is opened and its code S
+  confirmed; a near-miss contact ("Kline" for "Klein") stops for review. Not yet live: resuming
+  at the Invoice after a stop that follows the Order's save (unit-tested only).
 - **Windows: green end to end** in a Windows 11 ARM VM (Parallels) on this Mac, on the same
   `order.json`: Order PO000002 and Invoice INV000002 saved, the Invoice paid, both verified in
   Data > Documents, in about 1.5 minutes. Earlier runs on the same database covered the create
@@ -63,16 +70,16 @@ never leaves an old order behind for Stage 2.
 
 ### When a run needs review
 
-The pixelated copy embedded in the brief always needs review, because OCR can confirm only 4 of
-its 22 critical fields:
+The pixelated copy embedded in the brief always needs review, because OCR can confirm only 7 of
+its 41 fields (the clean original confirms all 41):
 
 ```bash
 uv run image-to-cash extract samples/sales-order-input.png \
   --fixture tests/fixtures/sample_order.json --out out/review-demo
 ```
 
-1. Check **every** field of `draft_order` in `out/review-demo/review.json` against the image. OCR
-   never checks names, the email, descriptions, quantities, cities or the payment method.
+1. Check **every** field of `draft_order` in `out/review-demo/review.json` against the image;
+   `mismatches` lists the fields OCR could not confirm.
 2. Correct the draft where needed. Write a contact with a multi-word first name as
    `Last, First Names` (for example `Klein, Anna Maria`); otherwise it goes back to review.
 3. Approve it:
@@ -80,6 +87,11 @@ uv run image-to-cash extract samples/sales-order-input.png \
 ```bash
 uv run image-to-cash approve out/review-demo/review.json --out out/review-demo
 ```
+
+**One unconfirmed field gets a second look first** (design §4): the reader re-reads just that
+field from a 3× crop around the OCR text most like it, and OCR reads the crop too. The field is
+corrected only when both agree and no other field already claims that print; `review.json`
+records the attempt under `zoomed_retry`.
 
 `approve` re-runs every arithmetic and business check before it writes `order.json`. It skips the
 OCR cross-check, because a person has vouched for the values. An `order.json` next to a
@@ -289,36 +301,67 @@ Still open:
 
 ## Known limitations
 
-- Names, email, descriptions, quantities, cities and the payment method are not cross-checked by
-  OCR. Quantities are covered indirectly by the line-total arithmetic.
-- The zoomed-crop retry for a single unconfirmed field (design §4) is not built. A mismatch goes
-  straight to review.
+- The OCR cross-check ignores where a value sits: two fields that swapped values (billing and
+  delivery ZIP) both pass. The zoomed second look is tried for one unconfirmed field only; two or
+  more go straight to review.
 - Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
   stopped them, but they are not usable as readers.
 - Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % scaling. Other
   Windows scalings and x64 PCs have not been tried (see
   [what the live Windows runs taught](#what-the-live-windows-runs-taught)).
-- A stop is not resumable. Master data saved before the stop (VAT, payment method, Debtor,
-  Products) is found and reused on the next run, but an Order saved before a stop would be entered
-  again, so restore the database backup after a stop past the Order's save.
-- Grid rows are assumed 15 pt high. Every row selection is copied back and compared, so a wrong
-  assumption stops the run instead of picking the wrong row.
+- A re-run never enters an order twice. Before creating anything it searches Data > Documents
+  for the reference: a saved Order without its Invoice resumes at the Invoice, Order plus Invoice
+  is reported as already entered, and anything else goes to a person. Master data saved before a
+  stop is found and reused. What is not automatic: unsaved editors left by a stop must be finished
+  or discarded by a person (on Windows, Fakturama's "Save Parts" list hides its ticks, so the bot
+  never answers it).
+- Grid rows are measured by OCR where the order's line grid shows text; elsewhere (selectors,
+  lists) the layout's row height is assumed. Every row selection is copied back and compared, so
+  a wrong value stops the run instead of picking the wrong row.
+- Batch runs stop at the first drive stop, for the same reason: unsaved editors first.
+
+## Unattended: a folder of orders
+
+`batch` reads and enters every order image in a folder, one after another:
+
+```bash
+uv run --env-file .env image-to-cash batch inbox/ --out out/batch
+```
+
+Each image moves to `inbox/done/` (Order and Invoice saved and verified), `inbox/review/`
+(extraction needs a person; Fakturama untouched) or `inbox/stopped/` (the drive stopped; the
+batch stops with it). Results land in `out/batch/<image name>/`, one line per image in
+`out/batch/batch.jsonl`. `--watch 30` keeps polling the folder.
+
+The bot drives the real mouse and keyboard, so it needs a machine of its own: a small PC or a
+virtual machine beside the pharmacist's own work. The Windows VM used here is that setup: the
+Mac stayed in use while the bot worked inside the VM.
+
+## What I would do differently
+
+The brief asks for Fakturama's UI, so writing to its database or using its web-shop import were
+out. Within that rule, two choices cost the most time:
+
+- **macOS first.** The brief's reference platform is Windows. Building macOS first, then Windows,
+  meant two backends and two sets of quirks; most Windows fixes above would have been met once.
+- **Driving from outside the process.** Fakturama is an Eclipse/SWT application. A driver inside
+  its JVM (SWTBot, or a Java agent) reads widgets and table cells directly: no foreground, mouse,
+  clipboard or OCR of grids, the same on both OSes, and much faster. It costs a change to
+  Fakturama's launch settings and ties the bot to Fakturama's widget classes. I would spike it
+  before writing more UI Automation code.
+
+What I would keep either way: every field and row selection read back, totals compared, and a
+stop instead of a guess.
 
 ## If I had 3 more hours
 
 In priority order, each item is about trust in an unattended run:
 
-1. **Make the run resumable instead of only stoppable.** Today a stop leaves unsaved editors open
-   and a person finishes or discards them. I would checkpoint each save (Debtor, Products, Order,
-   Invoice numbers) in `run.jsonl` so a re-run skips what is already saved and verified, and add a
-   `--discard-open-editors` clean-up that closes unsaved tabs without saving.
-2. **Run every reuse branch live against a seeded database.** The green run created everything;
-   Debtor and VAT reuse have also run live, product and payment-method reuse only in unit tests on
-   copied grid text. I would seed a database with all of them plus near-duplicates
-   (`CHR-ERG-010`, `Northstar Office GmbH & Co`) and confirm each selector reuses the exact row
-   and stops on the near miss. The VAT reuse branch should also open the existing rate and check
-   its code is S (brief §3.5); today only the creation branch checks it.
-3. **Measure grid geometry instead of assuming it**: the row pitch by OCR once per grid.
+1. **Discard unsaved editors safely**, so a batch can go on after a stop: on Windows that means
+   reading "Save Parts" ticks from a screenshot of its checkboxes before pressing anything.
+2. **Spike an in-process SWT driver** (see above) on one step, such as the Debtor selector, and
+   compare speed and robustness with UI Automation.
+3. **Measure the selectors' and lists' rows too**, not only the order lines.
 4. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
    Windows 11 ARM VM at 200 % scaling. Next: an x64 PC at 100 % and 150 %, measure
    `row_header_dx`, and scroll editors so the flow does not depend on the editor's height.
