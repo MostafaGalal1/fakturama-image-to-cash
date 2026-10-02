@@ -7,7 +7,7 @@ from typing import TypeVar
 
 from image_to_cash.drive.elements import Element, Role
 from image_to_cash.drive.fakturama.context import Context
-from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, grid_at, has_rows
+from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, grid_at, has_rows, row_y
 from image_to_cash.drive.locate import LocatorError, by_title, right_of_label
 from image_to_cash.drive.waits import wait_until
 from image_to_cash.errors import NeedsReview
@@ -16,6 +16,7 @@ Row = TypeVar("Row")
 GRID_DY = 80  # below the search row, inside the grid
 VIEW_TIMEOUT = 15
 LIST_ATTEMPTS = 3  # a list can lag a save by a moment
+ROW_X = 150  # into a row's text, clear of the grid's left edge
 
 
 def search_view(
@@ -70,3 +71,10 @@ def view_button(ctx: Context, help_text: str) -> Element:
     except LocatorError:
         raise NeedsReview("control_not_found", {"control": help_text}) from None
 
+
+
+def open_row(ctx: Context, index: int, what: str) -> None:
+    """Double-clicks row `index` of the list the last search_view showed, which opens its editor."""
+    view = ctx.wb.view_area()
+    grid = grid_at(ctx.ui, view.center[0], view.y + GRID_DY, what)
+    ctx.ui.click(grid, at=(grid.rect.x + ROW_X, row_y(ctx.ui.layout, grid, index)), count=2)

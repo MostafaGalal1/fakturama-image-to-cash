@@ -116,6 +116,7 @@ def _fill_address(ctx: Context, debtor: Debtor, address: Address, *, roles: tupl
     if address.name != debtor.company:  # an extra name line only when the image gives one
         set_text(ctx.ui, right_of_label(fields, "additional name"), address.name, label="additional_name")
     set_text(ctx.ui, right_of_label(fields, "Street"), address.street, label="street")
+    ctx.wb.check_errors()  # Fakturama warns here when a contact of this name has this street
     set_text(ctx.ui, right_of_label(fields, "ZIP - City", nth=0), address.zip, label="zip")
     set_text(ctx.ui, right_of_label(fields, "ZIP - City", nth=1), address.city, label="city")
     choose_option(ctx.ui, right_of_label(fields, "Country", role=Role.POPUP), address.country, label="country")

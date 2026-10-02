@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from image_to_cash.drive.backend.win_units import without_mnemonics
 from image_to_cash.drive.elements import Element, Rect, Role
 
 UIA_ROLES = {
@@ -52,6 +53,8 @@ def element_from_uia(record: UiaRecord, handle: object = None) -> Element:
     if native == "ComboBox" and record.editable:
         role = Role.COMBO_BOX
     title, value = record.name, record.value
+    if native == "TabItem" and title:
+        title = without_mnemonics(title)  # a tab named "GmbH && Co" shows "GmbH & Co"
     if role is Role.LABEL:
         title, value = None, record.name
     elif role in FIELD_ROLES:

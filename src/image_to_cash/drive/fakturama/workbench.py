@@ -21,6 +21,7 @@ T = TypeVar("T")
 
 MAIN_TITLE_PREFIX = "Fakturama - "
 ERROR_DIALOG = "Internal Error"
+REVIEW_DIALOGS = {ERROR_DIALOG: "fakturama_internal_error", "Duplicate Contact": "duplicate_contact"}
 OPEN_TIMEOUT = 30
 SAVE_TIMEOUT = 15
 DIALOG_TIMEOUT = 10
@@ -173,13 +174,25 @@ class Workbench:
             raise NeedsReview("editor_tab", {"tab": what, "found": str(len(selected))})
         self.ui.click(selected[0])
 
+    def close_unchanged_editor(self, what: str) -> None:
+        """File > Close on the open editor, which must hold no changes: then no dialog asks."""
+        before = self.editor_tabs()
+        selected = [tab for tab in before if _selected(tab)]
+        if len(selected) != 1 or (selected[0].title or "").startswith("*"):
+            raise NeedsReview("editor_changed", {"editor": what})
+        self.ui.press_menu(("File", "Close"))
+        wait_until(lambda: len(self.editor_tabs()) < len(before), what=f"the {what} editor to close", timeout=5, poll=0.3)
+
     def check_errors(self) -> None:
-        errors = [w for w in self.ui.windows() if w.title == ERROR_DIALOG]
+        """Stops on Fakturama's own warnings. An internal error is acknowledged; a duplicate
+        warning stays open for the person who reviews the stop."""
+        errors = [w for w in self.ui.windows() if w.title in REVIEW_DIALOGS]
         if not errors:
             return
         message = next((e.title or e.value or "" for e in self.ui.tree(errors[0]) if e.role is Role.LABEL and e.text), "")
-        self.ui.press(by_title(self.ui.tree(errors[0]), Role.BUTTON, "OK"))
-        raise NeedsReview("fakturama_internal_error", {"message": message.replace("\n", " ")[:200]})
+        if errors[0].title == ERROR_DIALOG:
+            self.ui.press(by_title(self.ui.tree(errors[0]), Role.BUTTON, "OK"))
+        raise NeedsReview(REVIEW_DIALOGS[errors[0].title], {"message": message.replace("\n", " ")[:200]})
 
     # Evidence.
 
