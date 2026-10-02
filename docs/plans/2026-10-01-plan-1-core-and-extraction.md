@@ -185,7 +185,7 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
     "alias": "NORTHSTAR-BERLIN",
     "contact_name": "Marta Klein",
     "email": "marta.klein@example.test",
-    "phone": "+49 30 3550 1420"
+    "phone": "+49 30 5550 1420"
   },
   "billing_address": {
     "name": "Northstar Office GmbH",
@@ -196,7 +196,7 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
   },
   "delivery_address": {
     "name": "Northstar Office Warehouse",
-    "street": "Huttenstrasse 41",
+    "street": "Beusselstrasse 44",
     "zip": "10553",
     "city": "Berlin",
     "country": "Germany"
@@ -208,10 +208,10 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
   },
   "items": [
     {
-      "sku": "CHR-ERGO-01",
+      "sku": "CHR-ERG-01",
       "description": "Ergonomic Desk Chair",
       "quantity": "2",
-      "unit": "PCS",
+      "unit": "pcs",
       "unit_net_price": "250.00",
       "discount_percent": "10",
       "vat_percent": "19",
@@ -221,7 +221,7 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
       "sku": "MAT-DESK-02",
       "description": "Anti-Fatigue Desk Mat",
       "quantity": "3",
-      "unit": "PCS",
+      "unit": "pcs",
       "unit_net_price": "40.00",
       "discount_percent": "0",
       "vat_percent": "19",
@@ -240,18 +240,24 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
 ```markdown
 # Sample fixture: provenance
 
-Transcribed by hand from the order image embedded in the take-home brief (385×530 px).
-These fields are **not legible** at that resolution. The values below are best readings and
-**unverified** (re-record once the original image is available):
+The recorded reader response for the sample order. It has been checked field by field against
+the original image, `samples/sales-order-input-clean.png` (992×1382 px), and every value matches.
 
-- `items[0].sku` (CHR-ERGO-01)
-- `billing_address.street` (Friedrichstrasse 88): street name and house number
-- `delivery_address.street` (Huttenstrasse 41): street name
-- `customer.phone` (+49 30 3550 1420)
-- `items[*].unit` (PCS)
+The take-home brief embeds a pixelated 385×530 copy of that image
+(`samples/sales-order-input.png`). This fixture was first transcribed from that copy, with best
+readings for the fields the copy hides. The original showed that three of those readings were
+wrong. OCR on the original flagged exactly those three:
 
-Everything else, including all amounts, percentages, dates, the reference and the totals, reads clearly.
-The real pipeline's OCR cross-check is expected to flag the unverified fields for review.
+- `customer.phone`: read as +49 30 3550 1420, printed +49 30 5550 1420
+- `delivery_address.street`: read as Huttenstrasse 41, printed Beusselstrasse 44
+- `items[0].sku`: read as CHR-ERGO-01, printed CHR-ERG-01
+
+`items[*].unit` was corrected too, from PCS to pcs as printed. It is not cross-checked, because
+it is never entered into Fakturama.
+
+On the original, macOS Vision OCR confirms all 22 critical fields. On the pixelated copy it
+confirms only the payment status and the three order totals (measured 2026-10-02), so a run on
+that copy always goes to review.
 ```
 
 - [ ] **Step 2: Replace `tests/conftest.py` with the shared fixtures**
@@ -329,6 +335,48 @@ def test_unknown_payment_method_is_rejected(sample_order):
     data = data | {"payment": data["payment"] | {"method": "Cash"}}
     with pytest.raises(ValidationError):
         Order.model_validate(data)
+
+
+def test_json_round_trip_is_lossless(sample_order):
+    assert Order.model_validate_json(sample_order.model_dump_json()) == sample_order
+
+
+def test_padded_text_is_stripped(sample_order):
+    data = with_value(sample_order.model_dump(mode="json"), ("items", 0, "sku"), "  CHR-ERG-01 ")
+    assert Order.model_validate(data).items[0].sku == "CHR-ERG-01"
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("items", 0, "quantity"), "0"),
+        (("items", 0, "unit_net_price"), "-1.00"),
+        (("items", 0, "discount_percent"), "101"),
+        (("items", 0, "vat_percent"), "19.555"),
+        (("items", 0, "line_net_total"), "1E+30"),
+        (("items", 0, "sku"), "   "),
+        (("items", 0, "unit"), ""),
+        (("totals", "net"), "-570.00"),
+        (("totals", "gross"), "NaN"),
+        (("currency",), "eur"),
+        (("billing_address", "zip"), " "),
+        (("customer", "surprise"), "x"),
+    ],
+)
+def test_invalid_values_are_rejected_at_their_field(sample_order, path, value):
+    data = with_value(sample_order.model_dump(mode="json"), path, value)
+    with pytest.raises(ValidationError) as excinfo:
+        Order.model_validate(data)
+    assert excinfo.value.errors()[0]["loc"] == path
+
+
+def with_value(data, path, value):
+    """Return a copy of nested JSON-like `data` with `value` placed at `path`."""
+    head, *rest = path
+    new_child = value if not rest else with_value(data[head], rest, value)
+    if isinstance(data, list):
+        return [new_child if index == head else item for index, item in enumerate(data)]
+    return data | {head: new_child}
 ```
 
 - [ ] **Step 4: Run the tests to verify they fail**
@@ -346,8 +394,15 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Bounded types: a garbled reading (e.g. "1E+30") must fail validation, not crash the money maths.
+NonEmptyStr = Annotated[str, Field(min_length=1)]
+Amount = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2)]
+Quantity = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=4)]
+Percent = Annotated[Decimal, Field(ge=0, le=100, max_digits=5, decimal_places=2)]
 
 
 class PaymentMethod(StrEnum):
@@ -362,35 +417,35 @@ class PaidStatus(StrEnum):
 
 
 class Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
 
 
 class Address(Frozen):
-    name: str = Field(min_length=1)
-    street: str = Field(min_length=1)
-    zip: str = Field(min_length=1)
-    city: str = Field(min_length=1)
-    country: str = Field(min_length=1)
+    name: NonEmptyStr
+    street: NonEmptyStr
+    zip: NonEmptyStr
+    city: NonEmptyStr
+    country: NonEmptyStr
 
 
 class Customer(Frozen):
     customer_id: str | None = None
-    company: str = Field(min_length=1)
-    alias: str = Field(min_length=1)
-    contact_name: str = Field(min_length=1)
+    company: NonEmptyStr
+    alias: NonEmptyStr
+    contact_name: NonEmptyStr
     email: str = Field(min_length=3)
-    phone: str = Field(min_length=1)
+    phone: NonEmptyStr
 
 
 class LineItem(Frozen):
-    sku: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    quantity: Decimal = Field(gt=0)
-    unit: str
-    unit_net_price: Decimal = Field(ge=0)
-    discount_percent: Decimal = Field(ge=0, le=100)
-    vat_percent: Decimal = Field(ge=0, le=100)
-    line_net_total: Decimal = Field(ge=0)
+    sku: NonEmptyStr
+    description: NonEmptyStr
+    quantity: Quantity
+    unit: NonEmptyStr
+    unit_net_price: Amount
+    discount_percent: Percent
+    vat_percent: Percent
+    line_net_total: Amount
 
 
 class Payment(Frozen):
@@ -400,15 +455,15 @@ class Payment(Frozen):
 
 
 class Totals(Frozen):
-    net: Decimal
-    vat: Decimal
-    gross: Decimal
+    net: Amount
+    vat: Amount
+    gross: Amount
 
 
 class Order(Frozen):
-    external_reference: str = Field(min_length=1)
+    external_reference: NonEmptyStr
     order_date: date
-    currency: str = Field(min_length=3, max_length=3)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
     customer: Customer
     billing_address: Address
     delivery_address: Address
@@ -420,7 +475,7 @@ class Order(Frozen):
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `uv run pytest -q`
-Expected: `6 passed`
+Expected: `20 passed`
 
 - [ ] **Step 7: Commit**
 
@@ -496,6 +551,11 @@ def test_unpaid_without_date_is_fine(sample_order):
     assert codes(sample_order.model_copy(update={"payment": payment})) == set()
 
 
+def test_unpaid_with_date_is_reported(sample_order):
+    payment = sample_order.payment.model_copy(update={"status": PaidStatus.UNPAID})
+    assert codes(sample_order.model_copy(update={"payment": payment})) == {"unpaid_with_date"}
+
+
 def test_unsupported_currency_is_reported(sample_order):
     assert codes(sample_order.model_copy(update={"currency": "USD"})) == {"unsupported_currency"}
 
@@ -503,6 +563,48 @@ def test_unsupported_currency_is_reported(sample_order):
 def test_invalid_email_is_reported(sample_order):
     customer = sample_order.customer.model_copy(update={"email": "marta.klein"})
     assert codes(sample_order.model_copy(update={"customer": customer})) == {"invalid_email"}
+
+
+def test_mixed_vat_rates_are_applied_per_line(sample_order):
+    first, second = sample_order.items
+    items = (first, second.model_copy(update={"vat_percent": Decimal("7")}))
+    totals = sample_order.totals.model_copy(
+        update={"vat": Decimal("93.90"), "gross": Decimal("663.90")}
+    )
+    order = sample_order.model_copy(update={"items": items, "totals": totals})
+    assert check_invariants(order) == ()
+
+
+def test_vat_is_rounded_once_on_the_sum(sample_order):
+    # 2 lines of 0.50 at 19%: rounding per line gives 0.10 + 0.10 = 0.20; the convention gives 0.19.
+    line = sample_order.items[1].model_copy(
+        update={"quantity": Decimal("1"), "unit_net_price": Decimal("0.50"), "line_net_total": Decimal("0.50")}
+    )
+    totals = sample_order.totals.model_copy(
+        update={"net": Decimal("1.00"), "vat": Decimal("0.19"), "gross": Decimal("1.19")}
+    )
+    clean = sample_order.model_copy(update={"items": (line, line), "totals": totals})
+    assert check_invariants(clean) == ()
+    per_line = totals.model_copy(update={"vat": Decimal("0.20"), "gross": Decimal("1.20")})
+    assert codes(clean.model_copy(update={"totals": per_line})) == {"vat_total_mismatch"}
+
+
+def test_one_cent_line_difference_names_line_and_sku(sample_order):
+    first, *rest = sample_order.items
+    off_by_cent = first.model_copy(update={"line_net_total": Decimal("450.01")})
+    order = sample_order.model_copy(update={"items": (off_by_cent, *rest)})
+    line_issues = [i for i in check_invariants(order) if i.code == "line_net_mismatch"]
+    assert len(line_issues) == 1
+    assert line_issues[0].message.startswith("line 1 (CHR-ERG-01):")
+
+
+def test_total_messages_name_what_they_compare(sample_order):
+    totals = sample_order.totals.model_copy(update={"net": Decimal("571")})
+    order = sample_order.model_copy(update={"totals": totals})
+    messages = {issue.code: issue.message for issue in check_invariants(order)}
+    assert messages["net_total_mismatch"] == (
+        "net total: printed line nets sum to 570.00, printed total is 571.00"
+    )
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -526,7 +628,7 @@ from image_to_cash.model import LineItem, Order, PaidStatus
 CENT = Decimal("0.01")
 HUNDRED = Decimal("100")
 SUPPORTED_CURRENCY = "EUR"
-EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 @dataclass(frozen=True)
@@ -536,12 +638,14 @@ class Issue:
 
 
 def money(value: Decimal) -> Decimal:
+    """Round a Decimal to cents, half-up (never the context's default banker's rounding)."""
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
 def expected_line_net(
     quantity: Decimal, unit_net_price: Decimal, discount_percent: Decimal
 ) -> Decimal:
+    """qty × unit × (1 − discount/100), rounded once at the end (no rounding of the unit price)."""
     return money(quantity * unit_net_price * (1 - discount_percent / HUNDRED))
 
 
@@ -566,30 +670,49 @@ def _check_line(index: int, item: LineItem) -> Issue | None:
         return None
     return Issue(
         "line_net_mismatch",
-        f"line {index} ({item.sku}): expected {expected}, printed {item.line_net_total}",
+        f"line {index} ({item.sku}): {item.quantity} × {item.unit_net_price:.2f} "
+        f"− {item.discount_percent}% is {expected:.2f}, printed {money(item.line_net_total):.2f}",
     )
+
+
+def _sum_line_nets(order: Order) -> Decimal:
+    return money(sum((item.line_net_total for item in order.items), Decimal(0)))
+
+
+def _expected_vat(order: Order) -> Decimal:
+    """Convention: Σ(printed line net × VAT%) over all lines, rounded once at the end.
+
+    A document that rounds VAT per line can differ by a cent; it goes to review, never silently through.
+    """
+    raw = sum((item.line_net_total * item.vat_percent / HUNDRED for item in order.items), Decimal(0))
+    return money(raw)
 
 
 def _total_issues(order: Order) -> tuple[Issue, ...]:
-    net = money(sum((item.line_net_total for item in order.items), Decimal(0)))
-    vat = money(
-        sum((item.line_net_total * item.vat_percent / HUNDRED for item in order.items), Decimal(0))
-    )
     checks = (
-        ("net_total_mismatch", net, order.totals.net),
-        ("vat_total_mismatch", vat, order.totals.vat),
-        ("gross_total_mismatch", money(order.totals.net + order.totals.vat), order.totals.gross),
+        ("net_total_mismatch", "net total: printed line nets sum to", _sum_line_nets(order), order.totals.net),
+        ("vat_total_mismatch", "VAT total: Σ(line net × VAT%) is", _expected_vat(order), order.totals.vat),
+        (
+            "gross_total_mismatch",
+            "gross total: printed net + VAT is",
+            money(order.totals.net + order.totals.vat),
+            order.totals.gross,
+        ),
     )
     return tuple(
-        Issue(code, f"expected {expected}, printed {printed}")
-        for code, expected, printed in checks
+        Issue(code, f"{label} {expected:.2f}, printed total is {money(printed):.2f}")
+        for code, label, expected, printed in checks
         if expected != money(printed)
     )
 
 
 def _payment_issues(order: Order) -> tuple[Issue, ...]:
-    if order.payment.status is PaidStatus.PAID and order.payment.payment_date is None:
+    paid = order.payment.status is PaidStatus.PAID
+    has_date = order.payment.payment_date is not None
+    if paid and not has_date:
         return (Issue("paid_without_date", "status is PAID but no payment date was printed"),)
+    if not paid and has_date:
+        return (Issue("unpaid_with_date", "status is not PAID but a payment date was printed"),)
     return ()
 
 
@@ -602,7 +725,7 @@ def _currency_issues(order: Order) -> tuple[Issue, ...]:
 
 
 def _contact_issues(order: Order) -> tuple[Issue, ...]:
-    if EMAIL_PATTERN.match(order.customer.email):
+    if EMAIL_PATTERN.fullmatch(order.customer.email):
         return ()
     return (Issue("invalid_email", f"not an email address: {order.customer.email}"),)
 ```
@@ -610,7 +733,7 @@ def _contact_issues(order: Order) -> tuple[Issue, ...]:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_invariants.py -q`
-Expected: `11 passed`
+Expected: `16 passed`
 
 - [ ] **Step 5: Commit**
 
@@ -633,19 +756,47 @@ git commit -m "feat: check order arithmetic and business invariants"
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from image_to_cash.errors import NeedsReview
-from image_to_cash.normalized import gross_price, normalize, split_contact_name
+from image_to_cash.model import PaymentMethod
+from image_to_cash.normalized import NormalizedOrder, gross_price, normalize, split_contact_name
 
 
 def test_split_contact_name():
     assert split_contact_name("Marta Klein") == ("Marta", "Klein")
 
 
-def test_split_contact_name_rejects_ambiguous_names():
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [("Klein, Anna Maria", ("Anna Maria", "Klein")), ("von Klein, Marta", ("Marta", "von Klein"))],
+)
+def test_split_contact_name_accepts_last_comma_first(name, expected):
+    assert split_contact_name(name) == expected
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Anna Maria Klein",
+        "Dr. Klein",
+        "Marta K.",
+        "Klein,",
+        "Marta",
+        "Marta Klein, Jr.",
+        "Dr. Klein, Marta",
+        "Klein, Dr. Marta",
+    ],
+)
+def test_split_contact_name_refuses_to_guess(name):
     with pytest.raises(NeedsReview) as excinfo:
-        split_contact_name("Anna Maria Klein")
+        split_contact_name(name)
     assert excinfo.value.reason == "contact_name_ambiguous"
+    assert excinfo.value.details == {"contact_name": name}
+
+
+def test_needs_review_message_includes_details():
+    assert str(NeedsReview("conflicting_sku_lines", {"sku": "X-1"})) == "conflicting_sku_lines: sku=X-1"
 
 
 def test_gross_price_for_sample_products():
@@ -653,17 +804,49 @@ def test_gross_price_for_sample_products():
     assert gross_price(Decimal("40.00"), Decimal("19")) == Decimal("47.60")
 
 
-def test_gross_price_rounds_half_up():
-    assert gross_price(Decimal("1.25"), Decimal("19")) == Decimal("1.49")
+def test_gross_price_rounds_half_up_on_ties():
+    # 1.50 × 1.19 = 1.785: half-up gives 1.79, banker's rounding would give 1.78.
+    assert gross_price(Decimal("1.50"), Decimal("19")) == Decimal("1.79")
 
 
 def test_normalize_sample(sample_order):
     normalized = normalize(sample_order)
-    assert (normalized.debtor.first_name, normalized.debtor.last_name) == ("Marta", "Klein")
-    assert normalized.debtor.delivery_differs is True
+    debtor = normalized.debtor
+    assert (debtor.first_name, debtor.last_name) == ("Marta", "Klein")
+    assert debtor.delivery_differs is True
     assert normalized.source_customer_id == "CUST-1007"
-    assert [p.gross_price for p in normalized.products] == [Decimal("297.50"), Decimal("47.60")]
-    assert [line.sku for line in normalized.lines] == ["CHR-ERGO-01", "MAT-DESK-02"]
+    assert normalized.payment.method is PaymentMethod.BANK_TRANSFER
+    assert normalized.totals == sample_order.totals
+    assert [(p.sku, p.gross_price, p.vat_percent) for p in normalized.products] == [
+        ("CHR-ERG-01", Decimal("297.50"), Decimal("19")),
+        ("MAT-DESK-02", Decimal("47.60"), Decimal("19")),
+    ]
+    assert [
+        (line.sku, line.quantity, line.discount_percent, line.line_net_total)
+        for line in normalized.lines
+    ] == [
+        ("CHR-ERG-01", Decimal("2"), Decimal("10"), Decimal("450.00")),
+        ("MAT-DESK-02", Decimal("3"), Decimal("0"), Decimal("120.00")),
+    ]
+
+
+def test_normalize_accepts_largest_model_valid_price(sample_order):
+    item = sample_order.items[0].model_copy(
+        update={
+            "quantity": Decimal("1"),
+            "unit_net_price": Decimal("9999999999.99"),
+            "discount_percent": Decimal("0"),
+            "vat_percent": Decimal("100"),
+            "line_net_total": Decimal("9999999999.99"),
+        }
+    )
+    normalized = normalize(sample_order.model_copy(update={"items": (item,)}))
+    assert normalized.products[0].gross_price == Decimal("19999999999.98")
+
+
+def test_normalized_order_json_round_trip(sample_order):
+    normalized = normalize(sample_order)
+    assert NormalizedOrder.model_validate_json(normalized.model_dump_json()) == normalized
 
 
 def test_same_billing_and_delivery_is_not_flagged(sample_order):
@@ -671,19 +854,59 @@ def test_same_billing_and_delivery_is_not_flagged(sample_order):
     assert normalize(order).debtor.delivery_differs is False
 
 
-def test_repeated_sku_lines_share_one_product(sample_order):
+def test_name_line_difference_alone_counts_as_different(sample_order):
+    delivery = sample_order.billing_address.model_copy(update={"name": "Northstar Office Warehouse"})
+    order = sample_order.model_copy(update={"delivery_address": delivery})
+    assert normalize(order).debtor.delivery_differs is True
+
+
+def test_same_sku_lines_with_different_quantity_share_one_product(sample_order):
     first = sample_order.items[0]
-    normalized = normalize(sample_order.model_copy(update={"items": (first, first)}))
+    second = first.model_copy(
+        update={"quantity": Decimal("1"), "discount_percent": Decimal("0"), "line_net_total": Decimal("250.00")}
+    )
+    normalized = normalize(sample_order.model_copy(update={"items": (first, second)}))
     assert len(normalized.products) == 1
-    assert len(normalized.lines) == 2
+    assert [line.discount_percent for line in normalized.lines] == [Decimal("10"), Decimal("0")]
 
 
-def test_conflicting_sku_lines_need_review(sample_order):
+@pytest.mark.parametrize(
+    "change",
+    [{"unit_net_price": Decimal("260.00")}, {"description": "Other Chair"}, {"vat_percent": Decimal("7")}],
+    ids=["price", "description", "vat"],
+)
+def test_conflicting_sku_lines_need_review(sample_order, change):
     first = sample_order.items[0]
-    other_price = first.model_copy(update={"unit_net_price": Decimal("260.00")})
+    items = (first, first.model_copy(update=change))
     with pytest.raises(NeedsReview) as excinfo:
-        normalize(sample_order.model_copy(update={"items": (first, other_price)}))
+        normalize(sample_order.model_copy(update={"items": items}))
     assert excinfo.value.reason == "conflicting_sku_lines"
+    assert excinfo.value.details == {"sku": "CHR-ERG-01"}
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda d: d | {"lines": [d["lines"][0] | {"sku": "UNKNOWN"}, d["lines"][1]]},
+        lambda d: d | {"products": [d["products"][0], d["products"][0]]},
+        lambda d: d | {"lines": [d["lines"][0] | {"vat_percent": "7"}, d["lines"][1]]},
+        lambda d: d | {"debtor": d["debtor"] | {"first_name": " "}},
+        lambda d: d | {"products": [d["products"][0] | {"gross_price": "-1.00"}, d["products"][1]]},
+        lambda d: d | {"lines": [d["lines"][0]]},
+    ],
+    ids=[
+        "line-sku-without-product",
+        "duplicate-product",
+        "line-vat-differs",
+        "blank-name",
+        "negative-gross",
+        "product-without-line",
+    ],
+)
+def test_edited_order_json_is_validated(sample_order, edit):
+    data = edit(normalize(sample_order).model_dump(mode="json"))
+    with pytest.raises(ValidationError):
+        NormalizedOrder.model_validate(data)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -704,71 +927,132 @@ class NeedsReview(Exception):
         super().__init__(reason)
         self.reason = reason
         self.details = dict(details or {})
+
+    def __str__(self) -> str:
+        if not self.details:
+            return self.reason
+        listed = ", ".join(f"{key}={value}" for key, value in self.details.items())
+        return f"{self.reason}: {listed}"
 ```
 
 - [ ] **Step 4: Implement `src/image_to_cash/normalized.py`**
 
 ```python
-"""Stage-2 contract: the extracted order mapped onto what Fakturama needs (design §4, step 6)."""
+"""Stage-2 contract: the extracted order mapped onto what Fakturama needs (design §4, step 6).
+
+Precondition: callers run `check_invariants` first; `normalize` does no arithmetic checking.
+The contract is re-validated whenever order.json is loaded, because a person may have edited it.
+"""
 
 from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from image_to_cash.errors import NeedsReview
 from image_to_cash.invariants import HUNDRED, money
-from image_to_cash.model import Address, Frozen, LineItem, Order, Payment, PaymentMethod, Totals
+from image_to_cash.model import (
+    Address,
+    Amount,
+    Frozen,
+    LineItem,
+    NonEmptyStr,
+    Order,
+    Payment,
+    Percent,
+    Quantity,
+    Totals,
+)
+
+# A gross price can exceed a net Amount's 12 digits (net × up to 2), so it gets one more digit.
+GrossPrice = Annotated[Decimal, Field(ge=0, max_digits=13, decimal_places=2)]
 
 
 class Debtor(Frozen):
-    company: str
-    first_name: str
-    last_name: str
-    alias: str
-    email: str
-    phone: str
+    company: NonEmptyStr
+    first_name: NonEmptyStr
+    last_name: NonEmptyStr
+    alias: NonEmptyStr
+    email: NonEmptyStr
+    phone: NonEmptyStr
     billing_address: Address
     delivery_address: Address
-    delivery_differs: bool
-    payment_method: PaymentMethod
+
+    @property
+    def delivery_differs(self) -> bool:
+        """Exact comparison of all fields, name line included: a false 'same' would misship."""
+        return self.billing_address != self.delivery_address
 
 
 class Product(Frozen):
-    sku: str
-    name: str
-    description: str
-    gross_price: Decimal
-    vat_percent: Decimal
+    """Master data. Fakturama's Name and Description both get `description`.
+
+    `gross_price` is net × (1 + VAT) and never includes a line discount.
+    """
+
+    sku: NonEmptyStr
+    description: NonEmptyStr
+    gross_price: GrossPrice
+    vat_percent: Percent
 
 
 class OrderLine(Frozen):
-    sku: str
-    quantity: Decimal
-    unit_net_price: Decimal
-    discount_percent: Decimal
-    vat_percent: Decimal
-    line_net_total: Decimal
+    """One Order line as typed into Fakturama: U.Price is the net unit price."""
+
+    sku: NonEmptyStr
+    quantity: Quantity
+    unit_net_price: Amount
+    discount_percent: Percent
+    vat_percent: Percent
+    line_net_total: Amount
 
 
 class NormalizedOrder(Frozen):
-    external_reference: str
+    external_reference: NonEmptyStr
     order_date: date
-    source_customer_id: str | None
+    source_customer_id: str | None  # recorded only; Fakturama proposes its own Customer ID
     debtor: Debtor
     products: tuple[Product, ...] = Field(min_length=1)
     lines: tuple[OrderLine, ...] = Field(min_length=1)
     payment: Payment
     totals: Totals
 
+    @model_validator(mode="after")
+    def _lines_match_products(self) -> NormalizedOrder:
+        vat_by_sku = {product.sku: product.vat_percent for product in self.products}
+        if len(vat_by_sku) != len(self.products):
+            raise ValueError("product SKUs must be unique")
+        unused = vat_by_sku.keys() - {line.sku for line in self.lines}
+        if unused:
+            raise ValueError(f"products without a line: {', '.join(sorted(unused))}")
+        for line in self.lines:
+            if line.sku not in vat_by_sku:
+                raise ValueError(f"line SKU {line.sku} has no product")
+            if line.vat_percent != vat_by_sku[line.sku]:
+                raise ValueError(f"line SKU {line.sku} has a different VAT than its product")
+        return self
+
 
 def split_contact_name(full_name: str) -> tuple[str, str]:
+    """Accept 'First Last', or 'Last, First Names' (how a reviewer writes multi-word names).
+
+    Titles and initials (any token ending in '.') go to review in both forms. An undotted
+    suffix such as 'Marta Klein, MBA' cannot be told apart from a first name; that is the
+    accepted cost of the comma form.
+    """
+    if "," in full_name:
+        last, _, first = full_name.partition(",")
+        last, first = last.strip(), first.strip()
+        if last and first and "," not in first and not _has_dotted_token(full_name):
+            return first, last
+        raise _ambiguous_name(full_name)
     parts = full_name.split()
-    if len(parts) != 2:
-        raise NeedsReview("contact_name_ambiguous", {"contact_name": full_name})
-    return parts[0], parts[1]
+    if len(parts) == 2 and not _has_dotted_token(full_name):
+        return parts[0], parts[1]
+    raise _ambiguous_name(full_name)
 
 
 def gross_price(net: Decimal, vat_percent: Decimal) -> Decimal:
@@ -776,22 +1060,21 @@ def gross_price(net: Decimal, vat_percent: Decimal) -> Decimal:
 
 
 def normalize(order: Order) -> NormalizedOrder:
-    first_name, last_name = split_contact_name(order.customer.contact_name)
+    customer = order.customer
+    first_name, last_name = split_contact_name(customer.contact_name)
     return NormalizedOrder(
         external_reference=order.external_reference,
         order_date=order.order_date,
-        source_customer_id=order.customer.customer_id,
+        source_customer_id=customer.customer_id,
         debtor=Debtor(
-            company=order.customer.company,
+            company=customer.company,
             first_name=first_name,
             last_name=last_name,
-            alias=order.customer.alias,
-            email=order.customer.email,
-            phone=order.customer.phone,
+            alias=customer.alias,
+            email=customer.email,
+            phone=customer.phone,
             billing_address=order.billing_address,
             delivery_address=order.delivery_address,
-            delivery_differs=order.billing_address != order.delivery_address,
-            payment_method=order.payment.method,
         ),
         products=_products(order.items),
         lines=tuple(_line(item) for item in order.items),
@@ -800,21 +1083,30 @@ def normalize(order: Order) -> NormalizedOrder:
     )
 
 
+def _has_dotted_token(name: str) -> bool:
+    return any(token.endswith(".") for token in name.replace(",", " ").split())
+
+
+def _ambiguous_name(full_name: str) -> NeedsReview:
+    return NeedsReview("contact_name_ambiguous", {"contact_name": full_name})
+
+
 def _products(items: tuple[LineItem, ...]) -> tuple[Product, ...]:
     by_sku: dict[str, Product] = {}
     for item in items:
-        product = Product(
-            sku=item.sku,
-            name=item.description,
-            description=item.description,
-            gross_price=gross_price(item.unit_net_price, item.vat_percent),
-            vat_percent=item.vat_percent,
-        )
-        existing = by_sku.get(item.sku)
-        if existing is not None and existing != product:
+        product = _product(item)
+        if by_sku.setdefault(item.sku, product) != product:
             raise NeedsReview("conflicting_sku_lines", {"sku": item.sku})
-        by_sku = {**by_sku, item.sku: product}
     return tuple(by_sku.values())
+
+
+def _product(item: LineItem) -> Product:
+    return Product(
+        sku=item.sku,
+        description=item.description,
+        gross_price=gross_price(item.unit_net_price, item.vat_percent),
+        vat_percent=item.vat_percent,
+    )
 
 
 def _line(item: LineItem) -> OrderLine:
@@ -831,7 +1123,7 @@ def _line(item: LineItem) -> OrderLine:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_normalized.py -q`
-Expected: `8 passed`
+Expected: `29 passed`
 
 - [ ] **Step 6: Commit**
 
@@ -854,7 +1146,12 @@ git commit -m "feat: normalise extracted order into Fakturama-shaped contract"
 import pytest
 from PIL import Image
 
-from image_to_cash.imaging import UPSCALE_FACTOR, for_ocr, load_image, upscale
+from image_to_cash.imaging import MAX_LONG_EDGE, UPSCALE_FACTOR, for_ocr, load_image, upscale
+
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+EXIF_ORIENTATION = 0x0112
+ROTATED_90_CW = 6
 
 
 def test_load_image_returns_rgb(tmp_path):
@@ -865,9 +1162,42 @@ def test_load_image_returns_rgb(tmp_path):
     assert image.size == (10, 20)
 
 
+@pytest.mark.parametrize("mode", ["RGBA", "LA", "P"])
+def test_load_image_flattens_transparency_onto_white(tmp_path, mode):
+    # A transparent pixel stored as black, next to an opaque black one.
+    source = Image.frombytes("RGBA", (2, 1), bytes([0, 0, 0, 0, 0, 0, 0, 255]))
+    path = tmp_path / "transparent.png"
+    source.convert(mode).save(path)
+    image = load_image(path)
+    assert [image.getpixel((0, 0)), image.getpixel((1, 0))] == [WHITE, BLACK]
+
+
+def test_load_image_applies_exif_orientation(tmp_path):
+    exif = Image.Exif()
+    exif[EXIF_ORIENTATION] = ROTATED_90_CW
+    path = tmp_path / "photo.jpg"
+    Image.new("RGB", (40, 20), "white").save(path, exif=exif)
+    assert load_image(path).size == (20, 40)
+
+
 def test_load_image_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_image(tmp_path / "missing.png")
+
+
+def test_load_image_rejects_non_image(tmp_path):
+    path = tmp_path / "order.png"
+    path.write_text("not an image", encoding="utf-8")
+    with pytest.raises(OSError):
+        load_image(path)
+
+
+def test_load_image_rejects_oversized_image(tmp_path, monkeypatch):
+    path = tmp_path / "huge.png"
+    Image.new("RGB", (10, 20), "white").save(path)
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 50)
+    with pytest.raises(ValueError, match="too large"):
+        load_image(path)
 
 
 def test_upscale_multiplies_size():
@@ -875,11 +1205,42 @@ def test_upscale_multiplies_size():
     assert upscale(image).size == (10 * UPSCALE_FACTOR, 20 * UPSCALE_FACTOR)
 
 
+def test_upscale_interpolates_instead_of_repeating_pixels():
+    image = Image.frombytes("L", (2, 1), bytes([0, 255]))
+    row = [upscale(image).getpixel((x, 0)) for x in range(2 * UPSCALE_FACTOR)]
+    assert any(0 < value < 255 for value in row)
+
+
+def test_upscale_lowers_factor_to_respect_long_edge_limit():
+    image = Image.new("RGB", (MAX_LONG_EDGE // 2, 10), "white")
+    assert upscale(image).size == (MAX_LONG_EDGE, 20)
+
+
+def test_upscale_never_shrinks_large_images():
+    image = Image.new("RGB", (MAX_LONG_EDGE + 1, 10), "white")
+    assert upscale(image).size == image.size
+
+
+@pytest.mark.parametrize("factor", [0, -1])
+def test_upscale_rejects_factor_below_one(factor):
+    with pytest.raises(ValueError, match="factor"):
+        upscale(Image.new("RGB", (10, 20), "white"), factor)
+
+
 def test_for_ocr_returns_new_grayscale_image():
     image = Image.new("RGB", (10, 20), "white")
     prepared = for_ocr(image)
     assert prepared.mode == "L"
+    assert prepared is not image
     assert image.mode == "RGB"
+
+
+def test_for_ocr_sharpens_edges():
+    # Five rows of grey 100 above five rows of grey 200: sharpening overshoots both sides.
+    image = Image.frombytes("L", (3, 10), bytes([100] * 15 + [200] * 15)).convert("RGB")
+    prepared = for_ocr(image)
+    assert prepared.getpixel((1, 4)) < 100
+    assert prepared.getpixel((1, 5)) > 200
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -899,25 +1260,46 @@ from pathlib import Path
 from PIL import Image, ImageFilter, ImageOps
 
 UPSCALE_FACTOR = 3
+# Upscaling helps small screenshots; past this long edge it only costs memory and upload size.
+MAX_LONG_EDGE = 4000
+PAPER_WHITE = (255, 255, 255, 255)
 
 
 def load_image(path: Path) -> Image.Image:
-    with Image.open(path) as image:
-        return image.convert("RGB")
+    """An upright RGB copy: EXIF rotation applied, transparency flattened onto white paper.
+
+    Raises OSError for a missing or unreadable file and ValueError for an oversized one.
+    """
+    try:
+        with Image.open(path) as source:
+            return _flatten_to_rgb(ImageOps.exif_transpose(source))
+    except Image.DecompressionBombError as error:
+        raise ValueError(f"image too large to process safely: {path}") from error
 
 
 def upscale(image: Image.Image, factor: int = UPSCALE_FACTOR) -> Image.Image:
-    return image.resize((image.width * factor, image.height * factor), Image.Resampling.LANCZOS)
+    """Enlarge by `factor`, lowered so the long edge stays within MAX_LONG_EDGE; never shrinks."""
+    if factor < 1:
+        raise ValueError(f"upscale factor must be at least 1, got {factor}")
+    capped = max(1, min(factor, MAX_LONG_EDGE // max(image.size)))
+    return image.resize((image.width * capped, image.height * capped), Image.Resampling.LANCZOS)
 
 
 def for_ocr(image: Image.Image) -> Image.Image:
     return ImageOps.grayscale(image).filter(ImageFilter.SHARPEN)
+
+
+def _flatten_to_rgb(image: Image.Image) -> Image.Image:
+    if "A" not in image.getbands() and "transparency" not in image.info:
+        return image.convert("RGB")
+    rgba = image.convert("RGBA")
+    return Image.alpha_composite(Image.new("RGBA", rgba.size, PAPER_WHITE), rgba).convert("RGB")
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_imaging.py -q`
-Expected: `4 passed`
+Expected: `16 passed`
 
 - [ ] **Step 5: Commit**
 
@@ -937,10 +1319,12 @@ git commit -m "feat: add image loading, upscaling and OCR preparation"
 
 `tests/test_ocr.py`:
 ```python
+import sys
+
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from image_to_cash.ocr import Box, build_ocr
+from image_to_cash.ocr import Box, OcrError, build_ocr
 
 
 def test_box_center():
@@ -952,21 +1336,52 @@ def test_unknown_engine_is_rejected():
         build_ocr("nope")
 
 
-def render(text: str) -> Image.Image:
-    image = Image.new("RGB", (1000, 200), "white")
-    ImageDraw.Draw(image).text((20, 20), text, fill="black", font=ImageFont.load_default(size=48))
-    return image
+def test_missing_vision_framework_is_an_ocr_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "Vision", None)
+    monkeypatch.delitem(sys.modules, "image_to_cash.ocr.macos_vision", raising=False)
+    with pytest.raises(OcrError, match="pyobjc-framework-Vision"):
+        build_ocr("macos-vision")
 
 
 @pytest.mark.macos
-def test_macos_vision_reads_rendered_text_with_top_left_boxes():
-    boxes = build_ocr("macos-vision").recognize(render("WEB-2026-0714-A17"))
-    joined = "".join(box.text for box in boxes).replace(" ", "")
-    assert "WEB-2026-0714-A17" in joined
-    first = boxes[0].box
-    assert 0 <= first.x < 1000
-    assert first.y < 80, "box must use a top-left origin (text was drawn near the top)"
-    assert first.width > 0 and first.height > 0
+@pytest.mark.parametrize(
+    ("rect", "expected"),
+    [
+        ((0.0, 0.0, 1.0, 1.0), Box(0, 0, 200, 100)),
+        ((0.1, 0.9, 0.5, 0.1), Box(20, 0, 100, 10)),
+        ((0.1, 0.0, 0.5, 0.1), Box(20, 90, 100, 10)),
+        ((-0.125, 0.9375, 0.5, 0.125), Box(0, 0, 75, 6)),
+        ((0.75, -0.0625, 0.5, 0.125), Box(150, 94, 50, 6)),
+    ],
+    ids=["whole-image", "top-strip", "bottom-strip", "clamped-top-left", "clamped-bottom-right"],
+)
+def test_vision_rect_becomes_top_left_pixel_box(rect, expected):
+    from image_to_cash.ocr.macos_vision import vision_rect_to_box  # imports Vision: macOS only
+
+    assert vision_rect_to_box(*rect, width=200, height=100) == expected
+
+
+VISION_PADDING_PX = 10  # Vision's boxes sit a few pixels outside the drawn glyphs
+
+
+def render(text: str, origin: tuple[int, int]) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    """A 1000x200 white image with `text` drawn at `origin`, plus the text's true bounding box."""
+    image = Image.new("RGB", (1000, 200), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=48)
+    draw.text(origin, text, fill="black", font=font)
+    return image, draw.textbbox(origin, text, font=font)
+
+
+@pytest.mark.macos
+@pytest.mark.parametrize("origin", [(20, 20), (500, 120)], ids=["top-left", "bottom-right"])
+def test_macos_vision_box_matches_drawn_text(origin):
+    image, truth = render("WEB-2026-0714-A17", origin)
+    boxes = build_ocr("macos-vision").recognize(image)
+    assert [box.text for box in boxes] == ["WEB-2026-0714-A17"]
+    box = boxes[0].box
+    edges = (box.x, box.y, box.x + box.width, box.y + box.height)
+    assert all(abs(edge - true) <= VISION_PADDING_PX for edge, true in zip(edges, truth)), (edges, truth)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1011,6 +1426,11 @@ class TextBox:
 
 
 class OcrEngine(Protocol):
+    """Each box holds an engine-defined text run (a line or a word), in engine-defined order.
+
+    Callers search the texts; they must not rely on box order or on neighbouring boxes.
+    """
+
     def recognize(self, image: Image.Image) -> tuple[TextBox, ...]: ...
 ```
 
@@ -1044,6 +1464,15 @@ class MacVisionOcr:
         return tuple(box for box in boxes if box is not None)
 
 
+def vision_rect_to_box(x: float, y: float, w: float, h: float, width: int, height: int) -> Box:
+    """Vision's normalised rect (origin bottom-left) as a top-left pixel box inside the image."""
+    left = _clamp(round(x * width), width)
+    right = _clamp(round((x + w) * width), width)
+    top = _clamp(round((1 - y - h) * height), height)
+    bottom = _clamp(round((1 - y) * height), height)
+    return Box(x=left, y=top, width=right - left, height=bottom - top)
+
+
 def _png_data(image: Image.Image) -> NSData:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -1056,14 +1485,13 @@ def _to_text_box(observation, width: int, height: int) -> TextBox | None:
     if not candidates:
         return None
     candidate = candidates[0]
-    rect = observation.boundingBox()  # normalised, origin bottom-left
-    box = Box(
-        x=round(rect.origin.x * width),
-        y=round((1 - rect.origin.y - rect.size.height) * height),
-        width=round(rect.size.width * width),
-        height=round(rect.size.height * height),
-    )
+    rect = observation.boundingBox()
+    box = vision_rect_to_box(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height, width, height)
     return TextBox(text=str(candidate.string()), box=box, confidence=float(candidate.confidence()))
+
+
+def _clamp(value: int, limit: int) -> int:
+    return min(max(value, 0), limit)
 ```
 
 - [ ] **Step 5: Implement `src/image_to_cash/ocr/__init__.py`**
@@ -1078,8 +1506,10 @@ ENGINES = ("macos-vision",)
 
 def build_ocr(name: str) -> OcrEngine:
     if name == "macos-vision":
-        from image_to_cash.ocr.macos_vision import MacVisionOcr
-
+        try:
+            from image_to_cash.ocr.macos_vision import MacVisionOcr
+        except ImportError as error:
+            raise OcrError("macos-vision OCR needs macOS with pyobjc-framework-Vision installed") from error
         return MacVisionOcr()
     raise ValueError(f"unknown OCR engine: {name!r} (available: {', '.join(ENGINES)})")
 
@@ -1090,7 +1520,7 @@ __all__ = ["ENGINES", "Box", "OcrEngine", "OcrError", "TextBox", "build_ocr"]
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_ocr.py -q`
-Expected: `3 passed` on macOS.
+Expected: `10 passed` on macOS.
 
 - [ ] **Step 7: Commit**
 
@@ -1111,8 +1541,13 @@ git commit -m "feat: add OCR interface with macOS Vision adapter"
 
 `tests/test_reconcile.py`:
 ```python
+from decimal import Decimal
+
+import pytest
+
+from image_to_cash.model import PaidStatus
 from image_to_cash.ocr import Box, TextBox
-from image_to_cash.reconcile import Mismatch, critical_fields, reconcile
+from image_to_cash.reconcile import Mismatch, critical_fields, fold, reconcile, value_pattern
 
 
 def text_boxes(texts):
@@ -1123,6 +1558,36 @@ def expected_texts(order):
     return tuple(expected for _, expected in critical_fields(order))
 
 
+def flagged(order, texts):
+    return tuple(mismatch.field for mismatch in reconcile(order, text_boxes(texts)))
+
+
+def without_one(texts, value):
+    index = texts.index(value)
+    return texts[:index] + texts[index + 1 :]
+
+
+def inserted_after(texts, anchor, *new):
+    index = texts.index(anchor) + 1
+    return texts[:index] + new + texts[index:]
+
+
+def replaced(texts, old, new):
+    return tuple(new if text == old else text for text in texts)
+
+
+def with_item(order, index, **changes):
+    items = tuple(
+        item.model_copy(update=changes) if position == index else item
+        for position, item in enumerate(order.items)
+    )
+    return order.model_copy(update={"items": items})
+
+
+def with_billing(order, **changes):
+    return order.model_copy(update={"billing_address": order.billing_address.model_copy(update=changes)})
+
+
 def test_critical_fields_use_printed_formats(sample_order):
     fields = dict(critical_fields(sample_order))
     assert fields["items[0].discount_percent"] == "10%"
@@ -1130,10 +1595,23 @@ def test_critical_fields_use_printed_formats(sample_order):
     assert fields["items[0].unit_net_price"] == "250.00"
     assert fields["totals.gross"] == "678.30"
     assert fields["payment.payment_date"] == "2026-07-18"
+    assert fields["delivery_address.street"] == "Beusselstrasse 44"
+    assert fields["customer.phone"] == "+49 30 5550 1420"
+
+
+def test_unpaid_order_has_no_payment_date_field(sample_order):
+    payment = sample_order.payment.model_copy(update={"status": PaidStatus.UNPAID, "payment_date": None})
+    fields = dict(critical_fields(sample_order.model_copy(update={"payment": payment})))
+    assert fields["payment.status"] == "UNPAID"
+    assert "payment.payment_date" not in fields
 
 
 def test_no_mismatch_when_ocr_sees_everything(sample_order):
     assert reconcile(sample_order, text_boxes(expected_texts(sample_order))) == ()
+
+
+def test_empty_ocr_flags_every_field(sample_order):
+    assert len(reconcile(sample_order, ())) == len(critical_fields(sample_order))
 
 
 def test_missing_sku_is_reported(sample_order):
@@ -1141,14 +1619,99 @@ def test_missing_sku_is_reported(sample_order):
     assert reconcile(sample_order, text_boxes(texts)) == (Mismatch("items[1].sku", "MAT-DESK-02"),)
 
 
+def test_wrong_digit_is_reported(sample_order):
+    texts = replaced(expected_texts(sample_order), "450.00", "460.00")
+    assert flagged(sample_order, texts) == ("items[0].line_net_total",)
+
+
 def test_lookalike_characters_are_tolerated(sample_order):
-    texts = tuple(t.replace("0", "O") for t in expected_texts(sample_order))
+    texts = tuple(t.replace("0", "O").replace("1", "l") for t in expected_texts(sample_order))
     assert reconcile(sample_order, text_boxes(texts)) == ()
 
 
 def test_spacing_and_decimal_commas_are_tolerated(sample_order):
     texts = tuple(t.replace(".", ",").replace("-", " - ") for t in expected_texts(sample_order))
     assert reconcile(sample_order, text_boxes(texts)) == ()
+
+
+def test_accents_and_dashes_are_tolerated(sample_order):
+    texts = replaced(expected_texts(sample_order), "Beusselstrasse 44", "Beüsselstraße 44")
+    texts = replaced(texts, "WEB-2026-0714-A17", "WEB–2026–0714–A17")
+    assert flagged(sample_order, texts) == ()
+
+
+def test_values_inside_a_merged_table_row_are_found(sample_order):
+    row = "1 CHR-ERG-01 Ergonomic Desk Chair 2 pcs 250.00 10% 19% 450.00"
+    merged = {"CHR-ERG-01", "250.00", "10%", "450.00"}
+    rest = tuple(t for t in expected_texts(sample_order) if t not in merged)
+    assert flagged(sample_order, (*rest, row)) == ()
+
+
+@pytest.mark.parametrize(
+    "printed", ["1.250,00", "1,250.00", "1'250.00", "1250.00", "EUR 1.250,00", "1.250,00 €"]
+)
+def test_thousands_separators_are_tolerated(sample_order, printed):
+    totals = sample_order.totals.model_copy(update={"gross": Decimal("1250.00")})
+    order = sample_order.model_copy(update={"totals": totals})
+    assert "totals.gross" not in flagged(order, (printed,))
+
+
+def test_quantity_beside_a_price_is_not_a_thousands_group(sample_order):
+    order = with_item(sample_order, 0, unit_net_price=Decimal("2250.00"))
+    assert "items[0].unit_net_price" in flagged(order, ("2 250.00",))
+
+
+@pytest.mark.parametrize(("expected", "printed"), [("10117", "10117Berlin"), ("570.00", "EUR570.00")])
+def test_numbers_may_touch_letters(expected, printed):
+    assert value_pattern(expected).search(fold(printed))
+
+
+@pytest.mark.parametrize("printed", ["FOIL", "OILX"])
+def test_lookalike_only_words_keep_letter_boundaries(printed):
+    assert not value_pattern("OIL").search(fold(printed))
+
+
+@pytest.mark.parametrize("printed", ["10%", "1.0%", "100%"])
+def test_zero_discount_is_not_vouched_for_by_a_longer_percent(sample_order, printed):
+    texts = replaced(expected_texts(sample_order), "0%", printed)
+    assert flagged(sample_order, texts) == ("items[1].discount_percent",)
+
+
+def test_each_field_needs_its_own_occurrence(sample_order):
+    texts = without_one(expected_texts(sample_order), "19%")
+    assert flagged(sample_order, texts) == ("items[1].vat_percent",)
+
+
+def test_paid_is_not_vouched_for_by_unpaid(sample_order):
+    texts = replaced(expected_texts(sample_order), "PAID", "UNPAID")
+    assert flagged(sample_order, texts) == ("payment.status",)
+
+
+def test_amount_is_not_the_tail_of_a_longer_number(sample_order):
+    texts = replaced(expected_texts(sample_order), "120.00", "1120.00")
+    assert flagged(sample_order, texts) == ("items[1].line_net_total",)
+
+
+def test_truncated_values_are_reported(sample_order):
+    order = with_item(sample_order, 0, sku="CHR-ERG-0", unit_net_price=Decimal("50.00"))
+    assert flagged(order, expected_texts(sample_order)) == ("items[0].sku", "items[0].unit_net_price")
+
+
+def test_house_number_must_match_in_full(sample_order):
+    order = with_billing(sample_order, street="Friedrichstrasse 8")
+    assert flagged(order, expected_texts(sample_order)) == ("billing_address.street",)
+
+
+def test_zip_is_not_found_inside_the_phone_number(sample_order):
+    order = with_billing(sample_order, zip="30555")
+    assert flagged(order, expected_texts(sample_order)) == ("billing_address.zip",)
+
+
+def test_values_are_not_glued_across_boxes(sample_order):
+    order = with_item(sample_order, 0, sku="CHR-ERG-012")
+    texts = inserted_after(without_one(expected_texts(sample_order), "250.00"), "CHR-ERG-01", "2")
+    texts = (*texts, "Qty 2", "50.00 EUR")
+    assert flagged(order, texts) == ("items[0].sku", "items[0].unit_net_price")
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1159,17 +1722,35 @@ Expected: `ModuleNotFoundError: No module named 'image_to_cash.reconcile'`
 - [ ] **Step 3: Implement `src/image_to_cash/reconcile.py`**
 
 ```python
-"""Cross-check critical reader fields against an independent OCR read (design §4, step 4)."""
+"""Cross-check critical reader fields against an independent OCR read (design §4, step 4).
+
+A field counts as confirmed only when its printed form appears inside one OCR box, as whole
+tokens, and the page shows it at least as many times as there are fields claiming it. A
+match never spans two boxes, so neighbouring boxes cannot be glued into a value.
+
+Limits: the check ignores where a value sits, so two fields that swapped values (say billing
+and delivery ZIP) both pass; catching that needs box geometry. A thousands group printed with
+a space ("1 250.00") still contains "250.00" as whole tokens. Space is not accepted as a
+thousands separator, so "2 250.00" (a quantity beside a price) never confirms 2250.00.
+"""
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 
 from image_to_cash.model import Order
 from image_to_cash.ocr.base import TextBox
 
+# Folded on both sides: OCR confuses these, and "," -> "." also unifies decimal commas.
 LOOKALIKES = str.maketrans({"O": "0", "I": "1", "L": "1", ",": "."})
+DASHES = str.maketrans(dict.fromkeys("‐‑‒–—−", "-"))
+AMOUNT = re.compile(r"\d+\.\d\d")
+THOUSANDS_SEPARATOR = r"[.']?"
+# Alphanumeric runs stay intact; OCR may add or drop spaces between runs and punctuation.
+TOKEN_PIECE = re.compile(r"[^\W_]+|\S")
 
 
 @dataclass(frozen=True)
@@ -1178,8 +1759,22 @@ class Mismatch:
     expected: str
 
 
-def normalize_token(text: str) -> str:
-    return "".join(text.upper().split()).translate(LOOKALIKES)
+def fold(text: str) -> str:
+    """Uppercase, drop accents, unify dashes and lookalikes, collapse whitespace to one space."""
+    decomposed = unicodedata.normalize("NFKD", text.upper())
+    bare = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return " ".join(bare.translate(DASHES).translate(LOOKALIKES).split())
+
+
+def value_pattern(expected: str) -> re.Pattern[str]:
+    """Matches the printed value as whole tokens inside one folded OCR line."""
+    folded = fold(expected)
+    body = _amount_body(folded) if AMOUNT.fullmatch(folded) else _text_body(folded)
+    # Decided before folding, so a value of lookalike letters only ("OIL") keeps letter edges.
+    edge = r"\w" if any(char.isalpha() for char in expected) else "[0-9]"
+    head = f"(?<!{edge})" + (r"(?<![0-9][.])" if folded[0].isdigit() else "")
+    tail = f"(?!{edge})" if folded[-1].isalnum() else ""
+    return re.compile(head + body + tail)
 
 
 def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
@@ -1187,7 +1782,10 @@ def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
         ("external_reference", order.external_reference),
         ("order_date", order.order_date.isoformat()),
         ("payment.status", order.payment.status.value),
+        ("customer.phone", order.customer.phone),
+        ("billing_address.street", order.billing_address.street),
         ("billing_address.zip", order.billing_address.zip),
+        ("delivery_address.street", order.delivery_address.street),
         ("delivery_address.zip", order.delivery_address.zip),
         ("totals.net", _amount(order.totals.net)),
         ("totals.vat", _amount(order.totals.vat)),
@@ -1210,12 +1808,34 @@ def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
 
 
 def reconcile(order: Order, text_boxes: tuple[TextBox, ...]) -> tuple[Mismatch, ...]:
-    haystack = normalize_token("".join(box.text for box in text_boxes))
+    lines = tuple(fold(box.text) for box in text_boxes)
+    fields = critical_fields(order)
+    patterns = tuple(value_pattern(expected) for _, expected in fields)
     return tuple(
         Mismatch(field, expected)
-        for field, expected in critical_fields(order)
-        if normalize_token(expected) not in haystack
+        for index, (field, expected) in enumerate(fields)
+        if _claim_rank(patterns, index) > _occurrences(patterns[index], lines)
     )
+
+
+def _amount_body(amount: str) -> str:
+    """'1250.00' -> 1[.']?250\\.00, because a printed amount may group its thousands."""
+    whole, cents = amount.split(".")
+    groups = [whole[max(0, end - 3) : end] for end in range(len(whole), 0, -3)][::-1]
+    return THOUSANDS_SEPARATOR.join(groups) + r"\." + cents
+
+
+def _text_body(value: str) -> str:
+    return r"\s*".join(re.escape(piece) for piece in TOKEN_PIECE.findall(value))
+
+
+def _claim_rank(patterns: tuple[re.Pattern[str], ...], index: int) -> int:
+    """1 for the first field claiming this value, 2 for the second, and so on."""
+    return sum(1 for pattern in patterns[: index + 1] if pattern.pattern == patterns[index].pattern)
+
+
+def _occurrences(pattern: re.Pattern[str], lines: tuple[str, ...]) -> int:
+    return sum(len(pattern.findall(line)) for line in lines)
 
 
 def _amount(value: Decimal) -> str:
@@ -1293,7 +1913,7 @@ def order_image(tmp_path) -> Path:
 - [ ] **Step 5: Run the whole suite**
 
 Run: `uv run pytest -q`
-Expected: all passed (`37 passed` on macOS)
+Expected: all passed (`122 passed` on macOS)
 
 - [ ] **Step 6: Commit**
 
@@ -1313,14 +1933,34 @@ git commit -m "feat: cross-check critical order fields against OCR text"
 
 `tests/test_readers.py`:
 ```python
+import json
+
 import pytest
+from PIL import Image
+from pydantic import ValidationError
 
+from image_to_cash.model import Order
 from image_to_cash.readers import ReaderError, build_reader
+from image_to_cash.readers.base import MAX_ISSUES_SHOWN, describe_validation_error
+
+MAX_MESSAGE_LENGTH = 600
 
 
-def test_fixture_reader_replays_recorded_order(sample_order_path, order_image, sample_order):
+@pytest.fixture
+def prepared_image() -> Image.Image:
+    return Image.new("RGB", (40, 60), "white")
+
+
+def test_fixture_reader_replays_recorded_order(sample_order_path, prepared_image, sample_order):
     reader = build_reader("fixture", fixture=sample_order_path)
-    assert reader.read(order_image) == sample_order
+    assert reader.read(prepared_image) == sample_order
+
+
+def test_fixture_reader_reads_the_path_it_was_given(tmp_path, prepared_image, sample_order):
+    other = tmp_path / "other.json"
+    other_order = sample_order.model_copy(update={"external_reference": "OTHER-1"})
+    other.write_text(other_order.model_dump_json(), encoding="utf-8")
+    assert build_reader("fixture", fixture=other).read(prepared_image).external_reference == "OTHER-1"
 
 
 def test_fixture_reader_requires_a_path():
@@ -1333,17 +1973,45 @@ def test_unknown_reader_is_rejected():
         build_reader("nope")
 
 
-def test_missing_fixture_raises_reader_error(tmp_path, order_image):
+def test_missing_fixture_raises_reader_error(tmp_path, prepared_image):
     reader = build_reader("fixture", fixture=tmp_path / "missing.json")
-    with pytest.raises(ReaderError):
-        reader.read(order_image)
+    with pytest.raises(ReaderError, match="missing.json"):
+        reader.read(prepared_image)
 
 
-def test_invalid_fixture_raises_reader_error(tmp_path, order_image):
+def test_non_utf8_fixture_raises_reader_error(tmp_path, prepared_image):
+    latin1 = tmp_path / "latin1.json"
+    latin1.write_bytes(b'{"external_reference": "\xe9"}')
+    with pytest.raises(ReaderError, match="latin1.json"):
+        build_reader("fixture", fixture=latin1).read(prepared_image)
+
+
+@pytest.mark.parametrize("content", ["", "{not json", "[]", '{"surprise": 1}', '{"external_reference": "X"}'])
+def test_invalid_fixture_raises_a_short_reader_error(tmp_path, prepared_image, content):
     bad = tmp_path / "bad.json"
-    bad.write_text('{"external_reference": "X"}', encoding="utf-8")
-    with pytest.raises(ReaderError):
-        build_reader("fixture", fixture=bad).read(order_image)
+    bad.write_text(content, encoding="utf-8")
+    with pytest.raises(ReaderError, match="bad.json") as caught:
+        build_reader("fixture", fixture=bad).read(prepared_image)
+    assert len(str(caught.value)) < MAX_MESSAGE_LENGTH
+
+
+def test_invalid_fixture_message_omits_the_offending_value(tmp_path, prepared_image, sample_order):
+    fixture = tmp_path / "order.json"
+    recorded = sample_order.model_dump(mode="json") | {"order_date": "SECRET-VALUE"}
+    fixture.write_text(json.dumps(recorded), encoding="utf-8")
+    with pytest.raises(ReaderError, match="order_date") as caught:
+        build_reader("fixture", fixture=fixture).read(prepared_image)
+    assert "SECRET-VALUE" not in str(caught.value)
+
+
+def test_validation_summary_lists_a_few_problems_and_counts_the_rest():
+    with pytest.raises(ValidationError) as caught:
+        Order.model_validate({})
+    hidden = len(caught.value.errors()) - MAX_ISSUES_SHOWN
+    summary = describe_validation_error(caught.value)
+    assert hidden > 0
+    assert summary.count(";") == MAX_ISSUES_SHOWN - 1
+    assert summary.endswith(f"(+{hidden} more)")
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1358,10 +2026,14 @@ Expected: `ModuleNotFoundError: No module named 'image_to_cash.readers'`
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Protocol
 
+from PIL import Image
+from pydantic import ValidationError
+
 from image_to_cash.model import Order
+
+MAX_ISSUES_SHOWN = 5
 
 
 class ReaderError(RuntimeError):
@@ -1369,7 +2041,28 @@ class ReaderError(RuntimeError):
 
 
 class ImageReader(Protocol):
-    def read(self, image_path: Path) -> Order: ...
+    def read(self, image: Image.Image) -> Order:
+        """Read an image already prepared by `imaging`: upright, RGB and upscaled.
+
+        Must not modify `image` (copy it before resizing). Raises ReaderError when it cannot
+        produce a schema-valid Order.
+        """
+        ...
+
+
+def describe_validation_error(error: ValidationError) -> str:
+    """A one-line summary of the first few problems, without the offending values.
+
+    The values are left out because a reader's output can hold personal data.
+    """
+    issues = error.errors(include_url=False, include_context=False, include_input=False)
+    shown = "; ".join(f"{_location(issue['loc'])}: {issue['msg']}" for issue in issues[:MAX_ISSUES_SHOWN])
+    hidden = len(issues) - MAX_ISSUES_SHOWN
+    return f"{shown} (+{hidden} more)" if hidden > 0 else shown
+
+
+def _location(loc: tuple[str | int, ...]) -> str:
+    return ".".join(str(part) for part in loc) or "<document>"
 ```
 
 - [ ] **Step 4: Implement `src/image_to_cash/readers/fixture.py`**
@@ -1381,21 +2074,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PIL import Image
 from pydantic import ValidationError
 
 from image_to_cash.model import Order
-from image_to_cash.readers.base import ReaderError
+from image_to_cash.readers.base import ReaderError, describe_validation_error
 
 
 class FixtureReader:
     def __init__(self, fixture_path: Path) -> None:
         self._fixture_path = fixture_path
 
-    def read(self, image_path: Path) -> Order:
+    def read(self, image: Image.Image) -> Order:
         try:
-            return Order.model_validate_json(self._fixture_path.read_text(encoding="utf-8"))
-        except (OSError, ValidationError) as error:
-            raise ReaderError(f"fixture {self._fixture_path} is unusable: {error}") from error
+            recorded = self._fixture_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise ReaderError(f"fixture {self._fixture_path} cannot be read: {error}") from error
+        try:
+            return Order.model_validate_json(recorded)
+        except ValidationError as error:
+            problems = describe_validation_error(error)
+            raise ReaderError(f"fixture {self._fixture_path} is not a valid order: {problems}") from error
 ```
 
 - [ ] **Step 5: Implement `src/image_to_cash/readers/__init__.py`**
@@ -1427,7 +2126,7 @@ __all__ = ["READERS", "FixtureReader", "ImageReader", "ReaderError", "build_read
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_readers.py -q`
-Expected: `5 passed`
+Expected: `13 passed`
 
 - [ ] **Step 7: Commit**
 
@@ -1448,10 +2147,55 @@ git commit -m "feat: add image-reader interface with fixture reader"
 `tests/test_extract.py`:
 ```python
 import json
+import os
+from decimal import Decimal
+
+import pytest
 
 from image_to_cash.extract import extract
+from image_to_cash.imaging import UPSCALE_FACTOR
+from image_to_cash.ocr import Box, TextBox
 from image_to_cash.outputs import write_result
 from image_to_cash.readers import FixtureReader
+from image_to_cash.reconcile import critical_fields
+
+
+class RecordingOcr:
+    """Sees exactly the given texts and keeps a copy of the image it was handed."""
+
+    def __init__(self, texts):
+        self._boxes = tuple(TextBox(text=text, box=Box(0, 0, 1, 1)) for text in texts)
+        self.seen = None
+
+    def recognize(self, image):
+        self.seen = image.copy()
+        return self._boxes
+
+
+class PaintingReader:
+    """Paints the image it is handed black, then replays the fixture."""
+
+    def __init__(self, fixture_path):
+        self._inner = FixtureReader(fixture_path)
+        self.seen_size = None
+
+    def read(self, image):
+        self.seen_size = image.size
+        image.paste((0, 0, 0), (0, 0, *image.size))
+        return self._inner.read(image)
+
+
+def expected_texts(order):
+    return tuple(expected for _, expected in critical_fields(order))
+
+
+def write_fixture(path, order):
+    path.write_text(order.model_dump_json(), encoding="utf-8")
+    return path
+
+
+def output_names(out_dir):
+    return sorted(path.name for path in out_dir.iterdir())
 
 
 def test_clean_extraction(sample_order_path, order_image, ocr_seeing_everything):
@@ -1469,11 +2213,32 @@ def test_unconfirmed_field_needs_review(sample_order_path, order_image, ocr_miss
 
 def test_normalisation_failure_needs_review(tmp_path, sample_order, order_image, ocr_seeing_everything):
     customer = sample_order.customer.model_copy(update={"contact_name": "Anna Maria Klein"})
-    fixture = tmp_path / "order.json"
-    fixture.write_text(sample_order.model_copy(update={"customer": customer}).model_dump_json())
+    fixture = write_fixture(tmp_path / "order.json", sample_order.model_copy(update={"customer": customer}))
     result = extract(order_image, FixtureReader(fixture), ocr_seeing_everything)
+    assert result.needs_review is True
     assert result.normalized is None
     assert "contact_name_ambiguous" in {issue.code for issue in result.issues}
+
+
+def test_arithmetic_issue_alone_needs_review(tmp_path, sample_order, order_image):
+    totals = sample_order.totals.model_copy(update={"gross": Decimal("679.30")})
+    tampered = sample_order.model_copy(update={"totals": totals})
+    fixture = write_fixture(tmp_path / "order.json", tampered)
+    result = extract(order_image, FixtureReader(fixture), RecordingOcr(expected_texts(tampered)))
+    assert result.mismatches == ()
+    target = write_result(result, tmp_path / "out")
+    assert target.name == "review.json"
+    assert [issue["code"] for issue in json.loads(target.read_text())["issues"]] == ["gross_total_mismatch"]
+
+
+def test_reader_gets_a_copy_and_ocr_gets_the_clean_greyscale_upscale(sample_order_path, sample_order, order_image):
+    reader = PaintingReader(sample_order_path)
+    ocr = RecordingOcr(expected_texts(sample_order))
+    extract(order_image, reader, ocr)
+    upscaled = (40 * UPSCALE_FACTOR, 60 * UPSCALE_FACTOR)
+    assert reader.seen_size == upscaled
+    assert (ocr.seen.mode, ocr.seen.size) == ("L", upscaled)
+    assert ocr.seen.getpixel((0, 0)) == 255, "the reader's paint must not reach OCR"
 
 
 def test_write_result_writes_order_json(tmp_path, sample_order_path, order_image, ocr_seeing_everything):
@@ -1488,8 +2253,54 @@ def test_write_result_writes_review_json(tmp_path, sample_order_path, order_imag
     target = write_result(result, tmp_path / "out")
     payload = json.loads(target.read_text())
     assert target.name == "review.json"
-    assert payload["mismatches"] == [{"field": "items[0].sku", "expected": "CHR-ERGO-01"}]
+    assert payload["reason"] == "1 field(s) not confirmed by OCR, 0 issue(s)"
+    assert payload["source_image"] == str(order_image)
+    assert payload["mismatches"] == [{"field": "items[0].sku", "expected": "CHR-ERG-01"}]
     assert payload["draft_order"]["external_reference"] == "WEB-2026-0714-A17"
+
+
+def test_review_json_keeps_non_ascii_readable(tmp_path, sample_order, order_image):
+    customer = sample_order.customer.model_copy(update={"company": "Müller & Söhne GmbH"})
+    fixture = write_fixture(tmp_path / "order.json", sample_order.model_copy(update={"customer": customer}))
+    target = write_result(extract(order_image, FixtureReader(fixture), RecordingOcr(())), tmp_path / "out")
+    assert "Müller & Söhne GmbH" in target.read_text(encoding="utf-8")
+
+
+def test_review_run_removes_an_earlier_order_json(
+    tmp_path, sample_order_path, order_image, ocr_seeing_everything, ocr_missing_first_sku
+):
+    out = tmp_path / "out"
+    write_result(extract(order_image, FixtureReader(sample_order_path), ocr_seeing_everything), out)
+    write_result(extract(order_image, FixtureReader(sample_order_path), ocr_missing_first_sku), out)
+    assert output_names(out) == ["review.json"]
+
+
+def test_clean_run_removes_an_earlier_review_json(
+    tmp_path, sample_order_path, order_image, ocr_seeing_everything, ocr_missing_first_sku
+):
+    out = tmp_path / "out"
+    write_result(extract(order_image, FixtureReader(sample_order_path), ocr_missing_first_sku), out)
+    write_result(extract(order_image, FixtureReader(sample_order_path), ocr_seeing_everything), out)
+    assert output_names(out) == ["order.json"]
+
+
+@pytest.mark.parametrize(
+    "ocr_fixture", ["ocr_seeing_everything", "ocr_missing_first_sku"], ids=["order", "review"]
+)
+def test_failed_write_leaves_neither_file(
+    tmp_path, monkeypatch, request, sample_order_path, order_image, ocr_fixture
+):
+    out = tmp_path / "out"
+    result = extract(order_image, FixtureReader(sample_order_path), request.getfixturevalue(ocr_fixture))
+    write_result(result, out)
+
+    def disk_full(*_):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", disk_full)
+    with pytest.raises(OSError):
+        write_result(result, out)
+    assert output_names(out) == []
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1519,6 +2330,7 @@ from image_to_cash.reconcile import Mismatch, reconcile
 
 @dataclass(frozen=True)
 class ExtractionResult:
+    source_image: Path
     order: Order
     normalized: NormalizedOrder | None
     mismatches: tuple[Mismatch, ...]
@@ -1530,56 +2342,106 @@ class ExtractionResult:
 
 
 def extract(image_path: Path, reader: ImageReader, ocr: OcrEngine) -> ExtractionResult:
-    order = reader.read(image_path)
-    text_boxes = ocr.recognize(for_ocr(upscale(load_image(image_path))))
+    """Read, cross-check, validate and normalise one order image.
+
+    Raises ReaderError, OcrError, OSError (unreadable image) or ValueError (oversized image).
+    """
+    prepared = upscale(load_image(image_path))
+    order = reader.read(prepared.copy())  # a reader must not change what OCR sees
+    text_boxes = ocr.recognize(for_ocr(prepared))
     mismatches = reconcile(order, text_boxes)
     issues = check_invariants(order)
     try:
         normalized = normalize(order)
     except NeedsReview as review:
-        review_issue = Issue(review.reason, str(review.details))
-        return ExtractionResult(order, None, mismatches, (*issues, review_issue))
-    return ExtractionResult(order, normalized, mismatches, issues)
+        review_issue = Issue(review.reason, str(review))
+        return ExtractionResult(image_path, order, None, mismatches, (*issues, review_issue))
+    return ExtractionResult(image_path, order, normalized, mismatches, issues)
 ```
 
 - [ ] **Step 4: Implement `src/image_to_cash/outputs.py`**
 
 ```python
-"""Persist Stage-1 results: order.json when clean, review.json when a person must check."""
+"""Persist Stage-1 results: order.json when clean, review.json when a person must check.
+
+The out dir only ever holds the latest run's complete result. Both files are removed before
+a new one is written, and each is written to a temporary file and renamed into place, so
+Stage 2 can never pick up an earlier order or a half-written one.
+"""
 
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
 from image_to_cash.extract import ExtractionResult
+from image_to_cash.normalized import NormalizedOrder
 
 ORDER_FILE = "order.json"
 REVIEW_FILE = "review.json"
 
 
-def write_result(result: ExtractionResult, out_dir: Path) -> Path:
+def discard_order(out_dir: Path) -> None:
+    """Remove order.json so a stopped or failed run cannot leave an earlier order for Stage 2."""
+    (out_dir / ORDER_FILE).unlink(missing_ok=True)
+
+
+def clear_results(out_dir: Path) -> None:
+    discard_order(out_dir)
+    (out_dir / REVIEW_FILE).unlink(missing_ok=True)
+
+
+def write_order(normalized: NormalizedOrder, out_dir: Path) -> Path:
+    """The only place order.json is created (`approve` uses it too)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    if not result.needs_review and result.normalized is not None:
-        target = out_dir / ORDER_FILE
-        target.write_text(result.normalized.model_dump_json(indent=2), encoding="utf-8")
-        return target
-    target = out_dir / REVIEW_FILE
+    return _write_atomic(out_dir / ORDER_FILE, normalized.model_dump_json(indent=2) + "\n")
+
+
+def write_result(result: ExtractionResult, out_dir: Path) -> Path:
+    clear_results(out_dir)
+    if result.normalized is not None and not result.needs_review:
+        return write_order(result.normalized, out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return _write_atomic(out_dir / REVIEW_FILE, _review_json(result))
+
+
+def _review_json(result: ExtractionResult) -> str:
     payload = {
-        "reason": "extraction needs review",
+        "reason": (
+            f"{len(result.mismatches)} field(s) not confirmed by OCR, "
+            f"{len(result.issues)} issue(s)"
+        ),
+        "source_image": str(result.source_image.absolute()),
         "mismatches": [asdict(mismatch) for mismatch in result.mismatches],
         "issues": [asdict(issue) for issue in result.issues],
         "draft_order": result.order.model_dump(mode="json"),
     }
-    target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
+def _write_atomic(target: Path, text: str) -> Path:
+    """Write beside the target, then rename: readers see the old file or the new one, never half."""
+    descriptor, temp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
     return target
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_extract.py -q`
-Expected: `5 passed`
+Expected: `12 passed`
 
 - [ ] **Step 6: Commit**
 
@@ -1621,13 +2483,17 @@ def run_extract(order_image, sample_order_path, out_dir):
     )
 
 
-def test_extract_clean_writes_order(tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything):
+def test_extract_clean_writes_order(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything
+):
     use_ocr(ocr_seeing_everything)
     assert run_extract(order_image, sample_order_path, tmp_path) == cli.EXIT_OK
     assert (tmp_path / "order.json").is_file()
 
 
-def test_extract_unconfirmed_writes_review(tmp_path, order_image, sample_order_path, use_ocr, ocr_missing_first_sku):
+def test_extract_unconfirmed_writes_review(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_missing_first_sku
+):
     use_ocr(ocr_missing_first_sku)
     assert run_extract(order_image, sample_order_path, tmp_path) == cli.EXIT_REVIEW
     assert (tmp_path / "review.json").is_file()
@@ -1654,6 +2520,130 @@ def test_missing_image_is_a_clear_error(tmp_path, sample_order_path, capsys):
     code = run_extract(tmp_path / "missing.png", sample_order_path, tmp_path)
     assert code == cli.EXIT_ERROR
     assert "image not found" in capsys.readouterr().err
+
+
+def test_failed_extract_removes_an_earlier_order(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything
+):
+    use_ocr(ocr_seeing_everything)
+    run_extract(order_image, sample_order_path, tmp_path)
+    assert run_extract(order_image, tmp_path / "missing.json", tmp_path) == cli.EXIT_ERROR
+    assert not (tmp_path / "order.json").exists()
+
+
+def test_refused_approve_removes_an_earlier_order(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything, sample_order
+):
+    use_ocr(ocr_seeing_everything)
+    run_extract(order_image, sample_order_path, tmp_path / "out")
+    totals = sample_order.totals.model_copy(update={"gross": Decimal("1.00")})
+    draft = tmp_path / "draft.json"
+    draft.write_text(sample_order.model_copy(update={"totals": totals}).model_dump_json())
+    assert cli.main(["approve", str(draft), "--out", str(tmp_path / "out")]) == cli.EXIT_REVIEW
+    assert not (tmp_path / "out" / "order.json").exists()
+
+
+def test_invalid_draft_is_refused_briefly_without_echoing_values(tmp_path, sample_order, capsys):
+    draft = tmp_path / "draft.json"
+    draft.write_text(json.dumps(sample_order.model_dump(mode="json") | {"order_date": "SECRET-VALUE"}))
+    assert cli.main(["approve", str(draft), "--out", str(tmp_path / "ok")]) == cli.EXIT_REVIEW
+    error = capsys.readouterr().err
+    assert "order_date" in error
+    assert "SECRET-VALUE" not in error
+
+
+def test_approve_refuses_an_ambiguous_contact_name(tmp_path, sample_order, capsys):
+    customer = sample_order.customer.model_copy(update={"contact_name": "Anna Maria Klein"})
+    draft = tmp_path / "draft.json"
+    draft.write_text(sample_order.model_copy(update={"customer": customer}).model_dump_json())
+    assert cli.main(["approve", str(draft), "--out", str(tmp_path / "ok")]) == cli.EXIT_REVIEW
+    assert "contact_name_ambiguous" in capsys.readouterr().err
+    assert not (tmp_path / "ok" / "order.json").exists()
+
+
+def test_approve_refuses_a_draft_that_is_not_an_object(tmp_path, capsys):
+    draft = tmp_path / "draft.json"
+    draft.write_text("[]")
+    assert cli.main(["approve", str(draft), "--out", str(tmp_path / "ok")]) == cli.EXIT_REVIEW
+    assert "not approved" in capsys.readouterr().err
+
+
+def test_approve_in_the_extract_folder_keeps_the_review_as_a_record(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_missing_first_sku
+):
+    use_ocr(ocr_missing_first_sku)
+    run_extract(order_image, sample_order_path, tmp_path)
+    assert cli.main(["approve", str(tmp_path / "review.json"), "--out", str(tmp_path)]) == cli.EXIT_OK
+    assert (tmp_path / "order.json").is_file()
+    assert (tmp_path / "review.json").is_file()
+
+
+def test_approve_refuses_order_json_as_a_draft_and_keeps_it(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything, capsys
+):
+    use_ocr(ocr_seeing_everything)
+    run_extract(order_image, sample_order_path, tmp_path)
+    assert cli.main(["approve", str(tmp_path / "order.json"), "--out", str(tmp_path)]) == cli.EXIT_ERROR
+    assert "Stage 2's input" in capsys.readouterr().err
+    assert (tmp_path / "order.json").is_file()
+
+
+def test_help_lists_the_exit_codes(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    help_text = " ".join(capsys.readouterr().out.split())  # argparse wraps to the terminal width
+    assert "3 needs review" in help_text
+
+
+def test_exit_codes_are_the_documented_contract():
+    assert (cli.EXIT_OK, cli.EXIT_ERROR, cli.EXIT_REVIEW) == (0, 1, 3)
+
+
+def test_usage_error_exits_2():
+    with pytest.raises(SystemExit) as stop:
+        cli.main(["extract"])
+    assert stop.value.code == 2
+
+
+def test_review_message_names_the_next_step(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_missing_first_sku, capsys
+):
+    use_ocr(ocr_missing_first_sku)
+    run_extract(order_image, sample_order_path, tmp_path)
+    out = capsys.readouterr().out
+    assert "needs review: 1 unconfirmed field(s), 0 issue(s)" in out
+    assert f"image-to-cash approve {tmp_path / 'review.json'}" in out
+
+
+def test_approve_says_what_it_approved(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_missing_first_sku, capsys
+):
+    use_ocr(ocr_missing_first_sku)
+    run_extract(order_image, sample_order_path, tmp_path)
+    capsys.readouterr()
+    assert cli.main(["approve", str(tmp_path / "review.json"), "--out", str(tmp_path)]) == cli.EXIT_OK
+    approved = "approved WEB-2026-0714-A17: Northstar Office GmbH, 2 line(s), gross 678.30 EUR, PAID"
+    assert approved in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("draft_name", ["missing.json", "binary.json", "broken.json"])
+def test_unreadable_draft_leaves_no_earlier_order(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything, draft_name
+):
+    use_ocr(ocr_seeing_everything)
+    out = tmp_path / "out"
+    run_extract(order_image, sample_order_path, out)
+    (tmp_path / "binary.json").write_bytes(b"\x89PNG\xff")
+    (tmp_path / "broken.json").write_text("{oops")
+    assert cli.main(["approve", str(tmp_path / draft_name), "--out", str(out)]) != cli.EXIT_OK
+    assert not (out / "order.json").exists()
+
+
+def test_broken_json_draft_names_the_file(tmp_path, capsys):
+    draft = tmp_path / "review.json"
+    draft.write_text('{"draft_order": {},}')
+    assert cli.main(["approve", str(draft), "--out", str(tmp_path / "ok")]) == cli.EXIT_REVIEW
+    assert f"{draft} is not valid JSON" in capsys.readouterr().err
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1670,10 +2660,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 
-from PIL import UnidentifiedImageError
+from pydantic import ValidationError
 
 from image_to_cash.errors import NeedsReview
 from image_to_cash.extract import extract
@@ -1681,16 +2672,21 @@ from image_to_cash.invariants import check_invariants
 from image_to_cash.model import Order
 from image_to_cash.normalized import normalize
 from image_to_cash.ocr import ENGINES, OcrError, build_ocr
-from image_to_cash.outputs import ORDER_FILE, write_result
+from image_to_cash.outputs import ORDER_FILE, clear_results, discard_order, write_order, write_result
 from image_to_cash.readers import READERS, ReaderError, build_reader
+from image_to_cash.readers.base import describe_validation_error
 
 EXIT_OK = 0
 EXIT_ERROR = 1
-EXIT_REVIEW = 2
+EXIT_REVIEW = 3  # 2 is argparse's code for bad command-line usage
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="image-to-cash", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="image-to-cash",
+        description="Read an order image into order.json for Stage 2, or review.json for a person.",
+        epilog="exit codes: 0 order.json written, 1 error, 2 bad usage, 3 needs review",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     extract_cmd = commands.add_parser("extract", help="read an order image into order.json")
@@ -1698,13 +2694,17 @@ def build_parser() -> argparse.ArgumentParser:
     extract_cmd.add_argument("--reader", default="fixture", choices=READERS)
     extract_cmd.add_argument("--fixture", type=Path, help="recorded response for --reader fixture")
     extract_cmd.add_argument("--ocr", default="macos-vision", choices=ENGINES)
-    extract_cmd.add_argument("--out", type=Path, default=Path("out"))
+    extract_cmd.add_argument(
+        "--out", type=Path, default=Path("out"), help="result folder; cleared of order.json and review.json first"
+    )
 
     approve_cmd = commands.add_parser(
         "approve", help="turn a human-corrected draft (review.json or order JSON) into order.json"
     )
     approve_cmd.add_argument("draft", type=Path)
-    approve_cmd.add_argument("--out", type=Path, default=Path("out"))
+    approve_cmd.add_argument(
+        "--out", type=Path, default=Path("out"), help="folder for order.json; an earlier one is removed first"
+    )
     return parser
 
 
@@ -1714,14 +2714,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "extract":
             return _extract(args)
         return _approve(args)
-    except (ReaderError, OcrError, OSError, UnidentifiedImageError, ValueError) as error:
+    except (ReaderError, OcrError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_ERROR
 
 
 def _extract(args: argparse.Namespace) -> int:
+    clear_results(args.out)  # a failed run must not leave an earlier order for Stage 2
     if not args.image.is_file():
-        raise FileNotFoundError(f"image not found: {args.image}")
+        raise FileNotFoundError(f"image not found or not a file: {args.image}")
     reader = build_reader(args.reader, fixture=args.fixture)
     result = extract(args.image, reader, build_ocr(args.ocr))
     target = write_result(result, args.out)
@@ -1730,14 +2731,29 @@ def _extract(args: argparse.Namespace) -> int:
             f"needs review: {len(result.mismatches)} unconfirmed field(s), "
             f"{len(result.issues)} issue(s); see {target}"
         )
+        print(f"  check every field of draft_order against {result.source_image}, correct it, then run:")
+        print(f"  image-to-cash approve {shlex.quote(str(target))} --out {shlex.quote(str(args.out))}")
         return EXIT_REVIEW
     print(f"order written to {target}")
     return EXIT_OK
 
 
 def _approve(args: argparse.Namespace) -> int:
-    payload = json.loads(args.draft.read_text(encoding="utf-8"))
-    order = Order.model_validate(payload.get("draft_order", payload))
+    if args.draft.resolve() == (args.out / ORDER_FILE).resolve():
+        raise ValueError(f"{args.draft} is Stage 2's input, not a draft; approve review.json instead")
+    discard_order(args.out)  # any outcome but "approved" must leave no earlier order for Stage 2
+    draft = args.draft.read_text(encoding="utf-8")
+    try:
+        payload = json.loads(draft)
+    except json.JSONDecodeError as error:
+        print(f"not approved: {args.draft} is not valid JSON: {error}", file=sys.stderr)
+        return EXIT_REVIEW
+    candidate = payload.get("draft_order", payload) if isinstance(payload, dict) else payload
+    try:
+        order = Order.model_validate(candidate)
+    except ValidationError as error:
+        print(f"not approved: draft is not a valid order: {describe_validation_error(error)}", file=sys.stderr)
+        return EXIT_REVIEW
     issues = check_invariants(order)
     if issues:
         for issue in issues:
@@ -1746,11 +2762,14 @@ def _approve(args: argparse.Namespace) -> int:
     try:
         normalized = normalize(order)
     except NeedsReview as review:
-        print(f"not approved: {review.reason} {review.details}", file=sys.stderr)
+        print(f"not approved: {review}", file=sys.stderr)
         return EXIT_REVIEW
-    args.out.mkdir(parents=True, exist_ok=True)
-    target = args.out / ORDER_FILE
-    target.write_text(normalized.model_dump_json(indent=2), encoding="utf-8")
+    target = write_order(normalized, args.out)
+    print(
+        f"approved {normalized.external_reference}: {normalized.debtor.company}, "
+        f"{len(normalized.lines)} line(s), gross {normalized.totals.gross} {order.currency}, "
+        f"{normalized.payment.status.value}"
+    )
     print(f"order written to {target}")
     return EXIT_OK
 
@@ -1775,43 +2794,122 @@ git commit -m "feat: add extract and approve command-line commands"
 
 ### Task 11: Run the real pipeline on the supplied image
 
+There are two images of the same order:
+- the pixelated 385×530 copy embedded in the brief (`samples/sales-order-input.png`);
+- the original, supplied separately (`samples/sales-order-input-clean.png`, 992×1382).
+
+On the copy, a run stops at review; a person checks the draft, then approves it. On the original,
+OCR confirms every critical field, and `order.json` is written directly.
+
 **Files:**
-- Create: `samples/sales-order-input.png`, `docs/extraction-run-notes.md`
+- Create: `samples/sales-order-input.png` (Step 1), `tests/test_sample_run.py`, `docs/extraction-run-notes.md`
+- Add: `samples/sales-order-input-clean.png` (the original, as supplied)
 
 - [ ] **Step 1: Copy the supplied image out of the brief**
 
 ```bash
 mkdir -p samples
-uv run python - <<'EOF'
+uv run python - <<'PY'
 import base64, re
 from pathlib import Path
 brief = Path.home() / "Downloads" / "[EXTERNAL] Take home project 2026.md"
 match = re.search(r"\[image1\]:\s*<data:image/png;base64,([A-Za-z0-9+/=]+)>", brief.read_text())
 Path("samples/sales-order-input.png").write_bytes(base64.b64decode(match.group(1)))
 print("saved")
-EOF
+PY
 ```
 Expected: `saved`
 
-- [ ] **Step 2: Run extraction with real macOS OCR**
+- [ ] **Step 2: Write the regression test**
+
+`tests/test_sample_run.py`:
+
+```python
+import json
+from pathlib import Path
+
+import pytest
+
+from image_to_cash import cli
+
+SAMPLES = Path(__file__).parent.parent / "samples"
+ORIGINAL_IMAGE = SAMPLES / "sales-order-input-clean.png"
+PIXELATED_IMAGE = SAMPLES / "sales-order-input.png"
+# Not legible on the pixelated 385x530 copy, even to a person (see tests/fixtures/sample_order.NOTES.md).
+ILLEGIBLE_FIELDS = {"items[0].sku", "billing_address.street", "delivery_address.street", "customer.phone"}
+# Best readings taken from the pixelated copy; the original prints something else.
+MISREADINGS = {
+    "customer.phone": "+49 30 3550 1420",
+    "delivery_address.street": "Huttenstrasse 41",
+    "items[0].sku": "CHR-ERGO-01",
+}
+
+
+def extract(image: Path, fixture: Path, out: Path) -> int:
+    return cli.main(["extract", str(image), "--fixture", str(fixture), "--out", str(out)])
+
+
+@pytest.mark.macos
+def test_original_image_confirms_every_critical_field(tmp_path, sample_order_path):
+    assert extract(ORIGINAL_IMAGE, sample_order_path, tmp_path) == cli.EXIT_OK
+    assert (tmp_path / "order.json").is_file()
+    assert not (tmp_path / "review.json").exists()
+
+
+@pytest.mark.macos
+def test_original_image_catches_the_misreadings_of_the_pixelated_copy(tmp_path, sample_order):
+    recorded = sample_order.model_dump(mode="json")
+    misread = recorded | {
+        "customer": recorded["customer"] | {"phone": MISREADINGS["customer.phone"]},
+        "delivery_address": recorded["delivery_address"] | {"street": MISREADINGS["delivery_address.street"]},
+        "items": [recorded["items"][0] | {"sku": MISREADINGS["items[0].sku"]}, *recorded["items"][1:]],
+    }
+    fixture = tmp_path / "misread.json"
+    fixture.write_text(json.dumps(misread), encoding="utf-8")
+    out = tmp_path / "out"
+    assert extract(ORIGINAL_IMAGE, fixture, out) == cli.EXIT_REVIEW
+    review = json.loads((out / "review.json").read_text(encoding="utf-8"))
+    assert {mismatch["field"]: mismatch["expected"] for mismatch in review["mismatches"]} == MISREADINGS
+
+
+@pytest.mark.macos
+def test_pixelated_copy_goes_to_review_with_the_illegible_fields_flagged(tmp_path, sample_order_path):
+    assert extract(PIXELATED_IMAGE, sample_order_path, tmp_path) == cli.EXIT_REVIEW
+    assert not (tmp_path / "order.json").exists()
+    review = json.loads((tmp_path / "review.json").read_text(encoding="utf-8"))
+    assert ILLEGIBLE_FIELDS <= {mismatch["field"] for mismatch in review["mismatches"]}
+    assert review["issues"] == []
+```
+
+Run: `uv run pytest tests/test_sample_run.py -v`
+Expected: 3 passed
+
+- [ ] **Step 3: Run extraction with real macOS OCR**
 
 Run: `uv run image-to-cash extract samples/sales-order-input.png --fixture tests/fixtures/sample_order.json --out out/sample`
-Expected:
-- Exit code 2 (`needs review`), with mismatches at least for the blurry fields listed in `sample_order.NOTES.md`.
-- If it exits 0 instead, OCR confirmed everything. Record that as well.
+Expected: exit code 3 (`needs review`); the four illegible fields are among the mismatches; 0 issues.
 
-- [ ] **Step 3: Record what OCR confirmed and what it didn't**
+- [ ] **Step 4: Check the draft by hand, then approve it**
+
+Compare every field of `draft_order` in `out/sample/review.json` with the image, not only the
+flagged ones. Then:
+
+Run: `uv run image-to-cash approve out/sample/review.json --out out/sample`
+Expected: exit code 0, `approved WEB-2026-0714-A17: ...`, and `out/sample/order.json` is written.
+
+- [ ] **Step 5: Record the run**
 
 Write `docs/extraction-run-notes.md` containing:
-- the exact command;
-- the exit code;
-- the `mismatches` list copied from `out/sample/review.json`;
-- one line per mismatch saying whether it's a blurry-image field (expected) or a real problem to fix.
+- both commands, their output and exit codes;
+- what OCR confirmed;
+- one row per mismatch, saying whether a person can read that field on the image;
+- how the arithmetic checks tie the unconfirmed line amounts to the confirmed totals;
+- what the human check covers, and which fields approving vouches for.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add samples/sales-order-input.png docs/extraction-run-notes.md
+git add samples/ tests/test_sample_run.py docs/extraction-run-notes.md docs/plans/2026-10-01-plan-1-core-and-extraction.md
 git commit -m "docs: record first real extraction run on the supplied image"
 ```
 
@@ -1832,10 +2930,14 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Status
 
-- **Stage 1 (extract): done.** Image → `order.json`, or `review.json` when anything can't be confirmed.
-- **Stage 2 (drive Fakturama): in progress.** See `docs/plans/`.
-- Image reader: `fixture` (a recorded response) until a personal LLM key is configured.
-- OCR: macOS Vision. Windows OCR and the UIA backend are designed for; the Windows adapter is not yet tested.
+- **Stage 1 (extract): done.**
+  - The output is `order.json`, or `review.json` when anything can't be confirmed.
+  - A vision model reads the image through OpenRouter. macOS Vision OCR then confirms every
+    critical field, and exact decimal arithmetic checks the totals.
+  - Run log: [docs/extraction-run-notes.md](docs/extraction-run-notes.md).
+- **Stage 2 (drive Fakturama): next.** It uses the macOS Accessibility API and is planned after an
+  accessibility spike. See `docs/plans/`.
+- **Windows:** the UI Automation and OCR adapters are designed for but not yet built.
 
 ## Setup (macOS)
 
@@ -1844,28 +2946,73 @@ uv sync
 uv run pytest -q
 ```
 
+The live reader needs an [OpenRouter](https://openrouter.ai) API key in a git-ignored `.env`. This
+command prompts for the key without echoing it:
+
+```bash
+(umask 077; read -rs "k?OpenRouter key: " && print -r -- "OPENROUTER_API_KEY=$k" > .env && echo)
+```
+
 ## Usage
+
+Read the original sample image with the live reader:
+
+```bash
+uv run --env-file .env image-to-cash extract samples/sales-order-input-clean.png \
+  --reader openrouter --out out/clean
+```
+
+- `--model` picks another OpenRouter model. The default is `anthropic/claude-sonnet-5.5`, which
+  costs about 1–2 cents per order.
+- Requests ask OpenRouter to use only providers that don't collect prompt data.
+- `--reader fixture --fixture tests/fixtures/sample_order.json` replays a recorded response
+  instead, with no key and no network.
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | `order.json` written |
+| `1` | error |
+| `2` | bad command-line usage |
+| `3` | needs review (see `review.json`) |
+
+`extract` clears `order.json` and `review.json` from the `--out` folder first, so a failed run
+never leaves an old order behind for Stage 2.
+
+### When a run needs review
+
+The pixelated copy embedded in the brief always needs review, because OCR can confirm only 4 of
+its 22 critical fields:
 
 ```bash
 uv run image-to-cash extract samples/sales-order-input.png \
-  --fixture tests/fixtures/sample_order.json --out out/sample
+  --fixture tests/fixtures/sample_order.json --out out/review-demo
 ```
 
-Exit codes: `0` order.json written · `2` needs review (see review.json) · `1` error.
-
-When review is needed, correct `draft_order` inside `review.json`, then:
+1. Check **every** field of `draft_order` in `out/review-demo/review.json` against the image. OCR
+   never checks names, the email, descriptions, quantities, cities or the payment method.
+2. Correct the draft where needed. Write a contact with a multi-word first name as
+   `Last, First Names` (for example `Klein, Anna Maria`); otherwise it goes back to review.
+3. Approve it:
 
 ```bash
-uv run image-to-cash approve out/sample/review.json --out out/sample
+uv run image-to-cash approve out/review-demo/review.json --out out/review-demo
 ```
 
-`approve` re-checks every invariant and only writes `order.json` if they pass.
-It skips the OCR cross-check, because a person has confirmed the values.
+`approve` re-runs every arithmetic and business check before it writes `order.json`. It skips the
+OCR cross-check, because a person has vouched for the values. An `order.json` next to a
+`review.json` therefore means a person approved it. Only approve values you can actually read: a
+best guess goes into Fakturama as if it were checked (see the run notes, section 2).
 
 ## Known limitations
 
-- The supplied image is 385×530 px. Some fields (item 1 SKU, street names, phone) are not legible
-  and are expected to go to review. See `tests/fixtures/sample_order.NOTES.md`.
+- Names, email, descriptions, quantities, cities and the payment method are not cross-checked by
+  OCR. Quantities are covered indirectly by the line-total arithmetic.
+- The zoomed-crop retry for a single unconfirmed field (design §4) is not built. A mismatch goes
+  straight to review.
+- Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
+  stopped them, but they are not usable as readers.
 ````
 
 - [ ] **Step 2: Commit**
