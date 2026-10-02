@@ -27,6 +27,8 @@ DIALOG_TIMEOUT = 10
 POLL = 0.5
 
 
+TOOLBAR_ROW = 10.0  # points: buttons of one toolbar row share their top
+
 class Workbench:
     def __init__(self, backend: UiBackend, shots: Path) -> None:
         self.ui = backend
@@ -72,13 +74,11 @@ class Workbench:
 
     def toolbar_button(self, help_text: str) -> Element:
         """A main-toolbar button by its tooltip. Buttons inside editors share some tooltips
-        (an Order's follow-up "Create: New Invoice"), so only the strip above the editors counts."""
-        top, _ = self._folders()
-        buttons = [
-            e
-            for e in self.ui.tree(self.main_window())
-            if e.role is Role.BUTTON and e.help == help_text and e.rect.bottom <= top.y
-        ]
+        (an Order's follow-up "Create: New Invoice"), so only the topmost row counts: the main
+        toolbar lies above every editor, and this works with no editor open."""
+        found = [e for e in self.ui.tree(self.main_window()) if e.role is Role.BUTTON and e.help == help_text]
+        top = min((e.rect.y for e in found), default=0.0)
+        buttons = [e for e in found if e.rect.y <= top + TOOLBAR_ROW]
         if len(buttons) != 1:
             raise NeedsReview("toolbar_button", {"help": help_text, "found": str(len(buttons))})
         return buttons[0]

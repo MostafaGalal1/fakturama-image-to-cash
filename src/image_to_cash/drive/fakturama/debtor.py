@@ -16,7 +16,7 @@ from image_to_cash.drive.fakturama.rules import address_lines_match, decide_debt
 from image_to_cash.drive.fakturama import controls as find
 from image_to_cash.drive.locate import by_title, right_of_label
 from image_to_cash.drive.report import Outcome
-from image_to_cash.drive.waits import wait_until
+from image_to_cash.drive.waits import WaitTimeout, wait_until
 from image_to_cash.errors import NeedsReview
 from image_to_cash.model import Address, PaymentMethod
 from image_to_cash.normalized import Debtor
@@ -25,6 +25,7 @@ SELECTOR = "Select the address"
 NEW_DEBTOR = "New Debtor"
 INVOICE_ROLE, DELIVERY_ROLE = "Invoice address", "Delivery address"
 EXTRA_ADDRESS_TAB = "additional address #1"
+TOGGLE_CLOSE_SECONDS = 1.5  # macOS closes the role window on the second ▶ press within this
 
 
 def select_debtor(ctx: Context, order: OrderEditor, debtor: Debtor) -> bool:
@@ -128,10 +129,20 @@ def _set_address_roles(ctx: Context, fields: tuple[Element, ...], roles: tuple[s
         if (ctx.ui.refresh(box).value == "1") != (title in roles):
             ctx.ui.press(box)
             wait_until(lambda b=box, t=title: (ctx.ui.refresh(b).value == "1") == (t in roles), what=f"{title} to toggle", timeout=3)
-    ctx.ui.press(toggle)
-    wait_until(lambda: not _role_boxes(ctx), what="the address type choices to close", timeout=5, poll=0.2)
+    _close_role_boxes(ctx, toggle)
     if shown(ctx.ui, kind) != ", ".join(roles) and set(shown(ctx.ui, kind).split(", ")) != set(roles):
         raise NeedsReview("address_type_wont_hold", {"wanted": ", ".join(roles)})
+
+
+def _close_role_boxes(ctx: Context, toggle: Element) -> None:
+    """The ▶ closes the window on macOS. On Windows the window closes as it loses focus and the
+    same press opens it again, so Escape closes it there."""
+    ctx.ui.press(toggle)
+    try:
+        wait_until(lambda: not _role_boxes(ctx), what="the address type choices to close", timeout=TOGGLE_CLOSE_SECONDS, poll=0.2)
+    except WaitTimeout:
+        ctx.ui.key("escape")
+        wait_until(lambda: not _role_boxes(ctx), what="the address type choices to close", timeout=5, poll=0.2)
 
 
 def _role_boxes(ctx: Context) -> dict[str, Element]:
