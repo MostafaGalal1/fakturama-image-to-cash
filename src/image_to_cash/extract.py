@@ -12,6 +12,7 @@ from image_to_cash.invariants import Issue, check_invariants
 from image_to_cash.model import Order
 from image_to_cash.normalized import NormalizedOrder, normalize
 from image_to_cash.ocr.base import OcrEngine
+from image_to_cash.pinned import pin_by_arithmetic
 from image_to_cash.readers.base import ImageReader
 from image_to_cash.reconcile import Mismatch, reconcile
 
@@ -24,6 +25,7 @@ class ExtractionResult:
     mismatches: tuple[Mismatch, ...]
     issues: tuple[Issue, ...]
     retry: Retry | None = None
+    pinned: tuple[str, ...] = ()  # percent cells OCR missed, confirmed by exact sums
 
     @property
     def needs_review(self) -> bool:
@@ -43,10 +45,11 @@ def extract(image_path: Path, reader: ImageReader, ocr: OcrEngine) -> Extraction
     retry = None
     if retried is not None:
         order, mismatches, retry = retried.order, retried.mismatches, retried.retry
+    mismatches, pinned = pin_by_arithmetic(order, mismatches)
     issues = check_invariants(order)
     try:
         normalized = normalize(order)
     except NeedsReview as review:
         review_issue = Issue(review.reason, str(review))
-        return ExtractionResult(image_path, order, None, mismatches, (*issues, review_issue), retry)
-    return ExtractionResult(image_path, order, normalized, mismatches, issues, retry)
+        return ExtractionResult(image_path, order, None, mismatches, (*issues, review_issue), retry, pinned)
+    return ExtractionResult(image_path, order, normalized, mismatches, issues, retry, pinned)
