@@ -10,6 +10,12 @@ def test_rect_edges_and_centre():
     assert rect.center == (25, 40)
 
 
+def test_rect_holds_points_on_its_edges_but_not_beyond():
+    rect = Rect(10, 20, 30, 40)
+    assert rect.holds(10, 20) and rect.holds(40, 60) and rect.holds(25, 30)
+    assert not rect.holds(9.9, 30) and not rect.holds(25, 60.1)
+
+
 def test_rect_rounds_to_whole_points_for_comparison():
     assert Rect(605.2, 271.6, 14.4, 13.5).rounded() == (605, 272, 14, 14)
 

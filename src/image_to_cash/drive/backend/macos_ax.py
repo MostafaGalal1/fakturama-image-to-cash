@@ -97,6 +97,7 @@ class MacAxBackend:
 
     def scan(self, area: Rect) -> tuple[Element, ...]:
         found: dict[tuple[str, tuple[int, int, int, int]], object] = {}
+        containers: dict[tuple[int, int, int, int], object] = {}
         y = area.y
         while y < area.bottom:
             x = area.x
@@ -104,13 +105,20 @@ class MacAxBackend:
                 handle = self._hit(self._app, x, y)
                 role = self._attr(handle, "AXRole") if handle is not None else None
                 step = SCAN_STEP_X
-                if role is not None and role not in CONTAINER_ROLES and self._has_frame(handle):
+                if role in CONTAINER_ROLES and self._has_frame(handle):
+                    containers.setdefault(self._rect(handle).rounded(), handle)
+                elif role is not None and self._has_frame(handle):
                     rect = self._rect(handle)
                     found.setdefault((str(role), rect.rounded()), handle)  # read the rest once
                     if role in LEAF_ROLES:  # nothing else to find inside this control
                         step = max(step, rect.right - x)
                 x += step
             y += SCAN_STEP_Y
+        for container in containers.values():  # disabled fields are listed there, though not hit-testable
+            for child in self._attr(container, "AXChildren") or ():
+                role = self._attr(child, "AXRole")
+                if role in LEAF_ROLES and self._has_frame(child) and area.contains(self._rect(child)):
+                    found.setdefault((str(role), self._rect(child).rounded()), child)
         elements = (self._element(handle) for handle in found.values())
         return tuple(sorted(elements, key=lambda e: (e.rect.y, e.rect.x)))
 
@@ -160,20 +168,24 @@ class MacAxBackend:
 
     # Input: only while Fakturama holds the keyboard and the front window.
 
-    def click(self, element: Element) -> None:
-        """Clicks the control's current centre, only once the control itself is under the pointer."""
+    def click(self, element: Element, *, at: tuple[float, float] | None = None, count: int = 1) -> None:
+        """Clicks the control's current centre (or `at`), only once the control itself is under the pointer."""
         handle = _handle(element)
-        x, y = self._rect(handle).center
+        frame = self._rect(handle)
+        x, y = frame.center if at is None else at
+        if not frame.holds(x, y):
+            raise ValueError(f"click point ({x:.0f}, {y:.0f}) lies outside the target {frame}")
         try:
             wait_until(lambda: self._on_top(handle, x, y), what="the target to be on top", timeout=CLICK_SETTLE_SECONDS, poll=0.1)
         except WaitTimeout:
             raise UnsafeToAct(f"something else covers the target at ({x:.0f}, {y:.0f}); refusing to click") from None
-        self._guard()
-        for kind in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
-            Quartz.CGEventPost(
-                Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, kind, (x, y), Quartz.kCGMouseButtonLeft)
-            )
-            time.sleep(EVENT_PAUSE_SECONDS)
+        for click_state in range(1, count + 1):
+            self._guard()
+            for kind in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
+                event = Quartz.CGEventCreateMouseEvent(None, kind, (x, y), Quartz.kCGMouseButtonLeft)
+                Quartz.CGEventSetIntegerValueField(event, Quartz.kCGMouseEventClickState, click_state)
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+                time.sleep(EVENT_PAUSE_SECONDS)
         self._clicked = handle
 
     def type_text(self, text: str) -> None:

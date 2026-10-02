@@ -33,7 +33,7 @@ def test_bad_chords_are_rejected(text, problem):
 
 
 def test_every_parseable_key_has_a_mac_key_code():
-    for key in ("a", "c", "v", "s", "w", "tab", "return", "escape", "up", "down", "left", "right", "delete", "space", "home", "end"):
+    for key in ("a", "c", "v", "s", "w", "tab", "return", "escape", "up", "down", "left", "right", "delete", "space", "home", "end", "f2", "0", "9"):
         assert key in MAC_KEY_CODES
         assert parse_chord(key).key == key
 

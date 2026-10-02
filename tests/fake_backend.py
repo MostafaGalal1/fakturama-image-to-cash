@@ -43,8 +43,8 @@ class FakeBackend:
         self.calls.append(("choose", option))
         self._values[popup.rect] = option
 
-    def click(self, element: Element) -> None:
-        self.calls.append(("click", element.rect))
+    def click(self, element: Element, *, at: tuple[float, float] | None = None, count: int = 1) -> None:
+        self.calls.append(("click", element.rect) if at is None and count == 1 else ("click", element.rect, at, count))
         self._focused, self._typed = element, ""
 
     def type_text(self, text: str) -> None:

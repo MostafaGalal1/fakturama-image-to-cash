@@ -44,6 +44,9 @@ class Rect:
     def center(self) -> tuple[float, float]:
         return (self.x + self.width / 2, self.y + self.height / 2)
 
+    def holds(self, x: float, y: float) -> bool:
+        return self.x <= x <= self.right and self.y <= y <= self.bottom
+
     def contains(self, other: Rect) -> bool:
         return (
             self.x <= other.x and self.y <= other.y and other.right <= self.right and other.bottom <= self.bottom

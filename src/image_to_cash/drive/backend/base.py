@@ -60,8 +60,9 @@ class UiBackend(Protocol):
         """Pick the pop-up option titled exactly `option`."""
         ...
 
-    def click(self, element: Element) -> None:
-        """A mouse click at the control's centre."""
+    def click(self, element: Element, *, at: tuple[float, float] | None = None, count: int = 1) -> None:
+        """A mouse click (`count` 2 for a double click) at the control's centre, or at the point
+        `at` inside it, e.g. one row of a grid."""
         ...
 
     def type_text(self, text: str) -> None:
