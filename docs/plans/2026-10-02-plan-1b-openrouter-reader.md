@@ -1301,27 +1301,28 @@ git commit -m "docs: OpenRouter reader in the design"
 
 ---
 
-### Task 4: Live run on the supplied image (needs OpenRouter credit)
+### Task 4: Live run on the original image
 
 **Files:**
 - Modify: `docs/extraction-run-notes.md`
 
 - [ ] **Step 1: Run the live reader**
 
-Run: `uv run --env-file .env image-to-cash extract samples/sales-order-input.png --reader openrouter --out out/live`
-Expected: exit 3 (needs review). OCR confirms the same 4 fields as before, and there are 0 or more
-arithmetic issues.
+Run: `uv run --env-file .env image-to-cash extract samples/sales-order-input-clean.png --reader openrouter --out out/clean-live`
+Expected: exit 0. OCR confirms all 22 critical fields, and `out/clean-live/order.json` is written.
+If HTTP 402 says the account "can only afford" fewer tokens than `MAX_OUTPUT_TOKENS`, lower the cap.
+The cap is 3,000: an order reply is about 400 tokens plus 65 per line.
 
-- [ ] **Step 2: Compare the model's draft with the fixture, field by field**
+- [ ] **Step 2: Check the result against the image**
 
-Record:
-- the model;
-- how many of the 41 leaf fields match `tests/fixtures/sample_order.json`;
-- every field that differs, and whether the checks or only the human check would catch it.
+Compare every value in `order.json` with the image. Then compare it with the run that uses the
+recorded response:
+`uv run image-to-cash extract samples/sales-order-input-clean.png --fixture tests/fixtures/sample_order.json --out out/fixture-clean`
+and `diff` the two `order.json` files.
 
-- [ ] **Step 3: Add a "Live reader" section to `docs/extraction-run-notes.md` and commit**
+- [ ] **Step 3: Record the run in `docs/extraction-run-notes.md` and commit**
 
 ```bash
 git add docs/extraction-run-notes.md
-git commit -m "docs: record the live OpenRouter run on the supplied image"
+git commit -m "docs: record the live OpenRouter run on the original image"
 ```

@@ -185,7 +185,7 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
     "alias": "NORTHSTAR-BERLIN",
     "contact_name": "Marta Klein",
     "email": "marta.klein@example.test",
-    "phone": "+49 30 3550 1420"
+    "phone": "+49 30 5550 1420"
   },
   "billing_address": {
     "name": "Northstar Office GmbH",
@@ -196,7 +196,7 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
   },
   "delivery_address": {
     "name": "Northstar Office Warehouse",
-    "street": "Huttenstrasse 41",
+    "street": "Beusselstrasse 44",
     "zip": "10553",
     "city": "Berlin",
     "country": "Germany"
@@ -208,10 +208,10 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
   },
   "items": [
     {
-      "sku": "CHR-ERGO-01",
+      "sku": "CHR-ERG-01",
       "description": "Ergonomic Desk Chair",
       "quantity": "2",
-      "unit": "PCS",
+      "unit": "pcs",
       "unit_net_price": "250.00",
       "discount_percent": "10",
       "vat_percent": "19",
@@ -221,7 +221,7 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
       "sku": "MAT-DESK-02",
       "description": "Anti-Fatigue Desk Mat",
       "quantity": "3",
-      "unit": "PCS",
+      "unit": "pcs",
       "unit_net_price": "40.00",
       "discount_percent": "0",
       "vat_percent": "19",
@@ -240,22 +240,24 @@ git commit -m "chore: scaffold image-to-cash project with design doc and plan 1"
 ```markdown
 # Sample fixture: provenance
 
-Transcribed by hand from the order image embedded in the take-home brief (385×530 px).
-These fields are **not legible** at that resolution. The values below are best readings and
-**unverified** (re-record once the original image is available):
+The recorded reader response for the sample order. It has been checked field by field against
+the original image, `samples/sales-order-input-clean.png` (992×1382 px), and every value matches.
 
-- `items[0].sku` (CHR-ERGO-01)
-- `billing_address.street` (Friedrichstrasse 88): street name and house number
-- `delivery_address.street` (Huttenstrasse 41): street name
-- `customer.phone` (+49 30 3550 1420)
-- `items[*].unit` (PCS)
+The take-home brief embeds a pixelated 385×530 copy of that image
+(`samples/sales-order-input.png`). This fixture was first transcribed from that copy, with best
+readings for the fields the copy hides. The original showed that three of those readings were
+wrong. OCR on the original flagged exactly those three:
 
-To a person, everything else (all amounts, percentages, dates, the reference and the totals)
-reads clearly. macOS Vision OCR does much worse at this size: on this image the cross-check
-confirms only the payment status and the three order totals, and flags the other 18 critical
-fields (measured 2026-10-02). A run on this image therefore always goes to review, and
-`approve` is the way through. `unit` is not cross-checked, because it is never entered into
-Fakturama.
+- `customer.phone`: read as +49 30 3550 1420, printed +49 30 5550 1420
+- `delivery_address.street`: read as Huttenstrasse 41, printed Beusselstrasse 44
+- `items[0].sku`: read as CHR-ERGO-01, printed CHR-ERG-01
+
+`items[*].unit` was corrected too, from PCS to pcs as printed. It is not cross-checked, because
+it is never entered into Fakturama.
+
+On the original, macOS Vision OCR confirms all 22 critical fields. On the pixelated copy it
+confirms only the payment status and the three order totals (measured 2026-10-02), so a run on
+that copy always goes to review.
 ```
 
 - [ ] **Step 2: Replace `tests/conftest.py` with the shared fixtures**
@@ -340,8 +342,8 @@ def test_json_round_trip_is_lossless(sample_order):
 
 
 def test_padded_text_is_stripped(sample_order):
-    data = with_value(sample_order.model_dump(mode="json"), ("items", 0, "sku"), "  CHR-ERGO-01 ")
-    assert Order.model_validate(data).items[0].sku == "CHR-ERGO-01"
+    data = with_value(sample_order.model_dump(mode="json"), ("items", 0, "sku"), "  CHR-ERG-01 ")
+    assert Order.model_validate(data).items[0].sku == "CHR-ERG-01"
 
 
 @pytest.mark.parametrize(
@@ -593,7 +595,7 @@ def test_one_cent_line_difference_names_line_and_sku(sample_order):
     order = sample_order.model_copy(update={"items": (off_by_cent, *rest)})
     line_issues = [i for i in check_invariants(order) if i.code == "line_net_mismatch"]
     assert len(line_issues) == 1
-    assert line_issues[0].message.startswith("line 1 (CHR-ERGO-01):")
+    assert line_issues[0].message.startswith("line 1 (CHR-ERG-01):")
 
 
 def test_total_messages_name_what_they_compare(sample_order):
@@ -816,14 +818,14 @@ def test_normalize_sample(sample_order):
     assert normalized.payment.method is PaymentMethod.BANK_TRANSFER
     assert normalized.totals == sample_order.totals
     assert [(p.sku, p.gross_price, p.vat_percent) for p in normalized.products] == [
-        ("CHR-ERGO-01", Decimal("297.50"), Decimal("19")),
+        ("CHR-ERG-01", Decimal("297.50"), Decimal("19")),
         ("MAT-DESK-02", Decimal("47.60"), Decimal("19")),
     ]
     assert [
         (line.sku, line.quantity, line.discount_percent, line.line_net_total)
         for line in normalized.lines
     ] == [
-        ("CHR-ERGO-01", Decimal("2"), Decimal("10"), Decimal("450.00")),
+        ("CHR-ERG-01", Decimal("2"), Decimal("10"), Decimal("450.00")),
         ("MAT-DESK-02", Decimal("3"), Decimal("0"), Decimal("120.00")),
     ]
 
@@ -879,7 +881,7 @@ def test_conflicting_sku_lines_need_review(sample_order, change):
     with pytest.raises(NeedsReview) as excinfo:
         normalize(sample_order.model_copy(update={"items": items}))
     assert excinfo.value.reason == "conflicting_sku_lines"
-    assert excinfo.value.details == {"sku": "CHR-ERGO-01"}
+    assert excinfo.value.details == {"sku": "CHR-ERG-01"}
 
 
 @pytest.mark.parametrize(
@@ -1593,8 +1595,8 @@ def test_critical_fields_use_printed_formats(sample_order):
     assert fields["items[0].unit_net_price"] == "250.00"
     assert fields["totals.gross"] == "678.30"
     assert fields["payment.payment_date"] == "2026-07-18"
-    assert fields["delivery_address.street"] == "Huttenstrasse 41"
-    assert fields["customer.phone"] == "+49 30 3550 1420"
+    assert fields["delivery_address.street"] == "Beusselstrasse 44"
+    assert fields["customer.phone"] == "+49 30 5550 1420"
 
 
 def test_unpaid_order_has_no_payment_date_field(sample_order):
@@ -1633,14 +1635,14 @@ def test_spacing_and_decimal_commas_are_tolerated(sample_order):
 
 
 def test_accents_and_dashes_are_tolerated(sample_order):
-    texts = replaced(expected_texts(sample_order), "Huttenstrasse 41", "Hüttenstraße 41")
+    texts = replaced(expected_texts(sample_order), "Beusselstrasse 44", "Beüsselstraße 44")
     texts = replaced(texts, "WEB-2026-0714-A17", "WEB–2026–0714–A17")
     assert flagged(sample_order, texts) == ()
 
 
 def test_values_inside_a_merged_table_row_are_found(sample_order):
-    row = "1 CHR-ERGO-01 Ergonomic Desk Chair 2 PCS 250.00 10% 19% 450.00"
-    merged = {"CHR-ERGO-01", "250.00", "10%", "450.00"}
+    row = "1 CHR-ERG-01 Ergonomic Desk Chair 2 pcs 250.00 10% 19% 450.00"
+    merged = {"CHR-ERG-01", "250.00", "10%", "450.00"}
     rest = tuple(t for t in expected_texts(sample_order) if t not in merged)
     assert flagged(sample_order, (*rest, row)) == ()
 
@@ -1691,7 +1693,7 @@ def test_amount_is_not_the_tail_of_a_longer_number(sample_order):
 
 
 def test_truncated_values_are_reported(sample_order):
-    order = with_item(sample_order, 0, sku="CHR-ERGO-0", unit_net_price=Decimal("50.00"))
+    order = with_item(sample_order, 0, sku="CHR-ERG-0", unit_net_price=Decimal("50.00"))
     assert flagged(order, expected_texts(sample_order)) == ("items[0].sku", "items[0].unit_net_price")
 
 
@@ -1701,13 +1703,13 @@ def test_house_number_must_match_in_full(sample_order):
 
 
 def test_zip_is_not_found_inside_the_phone_number(sample_order):
-    order = with_billing(sample_order, zip="30355")
+    order = with_billing(sample_order, zip="30555")
     assert flagged(order, expected_texts(sample_order)) == ("billing_address.zip",)
 
 
 def test_values_are_not_glued_across_boxes(sample_order):
-    order = with_item(sample_order, 0, sku="CHR-ERGO-012")
-    texts = inserted_after(without_one(expected_texts(sample_order), "250.00"), "CHR-ERGO-01", "2")
+    order = with_item(sample_order, 0, sku="CHR-ERG-012")
+    texts = inserted_after(without_one(expected_texts(sample_order), "250.00"), "CHR-ERG-01", "2")
     texts = (*texts, "Qty 2", "50.00 EUR")
     assert flagged(order, texts) == ("items[0].sku", "items[0].unit_net_price")
 ```
@@ -2253,7 +2255,7 @@ def test_write_result_writes_review_json(tmp_path, sample_order_path, order_imag
     assert target.name == "review.json"
     assert payload["reason"] == "1 field(s) not confirmed by OCR, 0 issue(s)"
     assert payload["source_image"] == str(order_image)
-    assert payload["mismatches"] == [{"field": "items[0].sku", "expected": "CHR-ERGO-01"}]
+    assert payload["mismatches"] == [{"field": "items[0].sku", "expected": "CHR-ERG-01"}]
     assert payload["draft_order"]["external_reference"] == "WEB-2026-0714-A17"
 
 
@@ -2792,11 +2794,16 @@ git commit -m "feat: add extract and approve command-line commands"
 
 ### Task 11: Run the real pipeline on the supplied image
 
-The demo uses only the supplied image. The run stops at review, a person checks the draft, then
-approves it. There is no synthetic sharp image.
+There are two images of the same order:
+- the pixelated 385×530 copy embedded in the brief (`samples/sales-order-input.png`);
+- the original, supplied separately (`samples/sales-order-input-clean.png`, 992×1382).
+
+On the copy, a run stops at review; a person checks the draft, then approves it. On the original,
+OCR confirms every critical field, and `order.json` is written directly.
 
 **Files:**
-- Create: `samples/sales-order-input.png`, `tests/test_sample_run.py`, `docs/extraction-run-notes.md`
+- Create: `samples/sales-order-input.png` (Step 1), `tests/test_sample_run.py`, `docs/extraction-run-notes.md`
+- Add: `samples/sales-order-input-clean.png` (the original, as supplied)
 
 - [ ] **Step 1: Copy the supplied image out of the brief**
 
@@ -2825,15 +2832,49 @@ import pytest
 
 from image_to_cash import cli
 
-SAMPLE_IMAGE = Path(__file__).parent.parent / "samples" / "sales-order-input.png"
-# Not legible at 385x530 even to a person (see tests/fixtures/sample_order.NOTES.md).
+SAMPLES = Path(__file__).parent.parent / "samples"
+ORIGINAL_IMAGE = SAMPLES / "sales-order-input-clean.png"
+PIXELATED_IMAGE = SAMPLES / "sales-order-input.png"
+# Not legible on the pixelated 385x530 copy, even to a person (see tests/fixtures/sample_order.NOTES.md).
 ILLEGIBLE_FIELDS = {"items[0].sku", "billing_address.street", "delivery_address.street", "customer.phone"}
+# Best readings taken from the pixelated copy; the original prints something else.
+MISREADINGS = {
+    "customer.phone": "+49 30 3550 1420",
+    "delivery_address.street": "Huttenstrasse 41",
+    "items[0].sku": "CHR-ERGO-01",
+}
+
+
+def extract(image: Path, fixture: Path, out: Path) -> int:
+    return cli.main(["extract", str(image), "--fixture", str(fixture), "--out", str(out)])
 
 
 @pytest.mark.macos
-def test_supplied_image_goes_to_review_with_the_illegible_fields_flagged(tmp_path, sample_order_path):
-    argv = ["extract", str(SAMPLE_IMAGE), "--fixture", str(sample_order_path), "--out", str(tmp_path)]
-    assert cli.main(argv) == cli.EXIT_REVIEW
+def test_original_image_confirms_every_critical_field(tmp_path, sample_order_path):
+    assert extract(ORIGINAL_IMAGE, sample_order_path, tmp_path) == cli.EXIT_OK
+    assert (tmp_path / "order.json").is_file()
+    assert not (tmp_path / "review.json").exists()
+
+
+@pytest.mark.macos
+def test_original_image_catches_the_misreadings_of_the_pixelated_copy(tmp_path, sample_order):
+    recorded = sample_order.model_dump(mode="json")
+    misread = recorded | {
+        "customer": recorded["customer"] | {"phone": MISREADINGS["customer.phone"]},
+        "delivery_address": recorded["delivery_address"] | {"street": MISREADINGS["delivery_address.street"]},
+        "items": [recorded["items"][0] | {"sku": MISREADINGS["items[0].sku"]}, *recorded["items"][1:]],
+    }
+    fixture = tmp_path / "misread.json"
+    fixture.write_text(json.dumps(misread), encoding="utf-8")
+    out = tmp_path / "out"
+    assert extract(ORIGINAL_IMAGE, fixture, out) == cli.EXIT_REVIEW
+    review = json.loads((out / "review.json").read_text(encoding="utf-8"))
+    assert {mismatch["field"]: mismatch["expected"] for mismatch in review["mismatches"]} == MISREADINGS
+
+
+@pytest.mark.macos
+def test_pixelated_copy_goes_to_review_with_the_illegible_fields_flagged(tmp_path, sample_order_path):
+    assert extract(PIXELATED_IMAGE, sample_order_path, tmp_path) == cli.EXIT_REVIEW
     assert not (tmp_path / "order.json").exists()
     review = json.loads((tmp_path / "review.json").read_text(encoding="utf-8"))
     assert ILLEGIBLE_FIELDS <= {mismatch["field"] for mismatch in review["mismatches"]}
@@ -2841,7 +2882,7 @@ def test_supplied_image_goes_to_review_with_the_illegible_fields_flagged(tmp_pat
 ```
 
 Run: `uv run pytest tests/test_sample_run.py -v`
-Expected: 1 passed
+Expected: 3 passed
 
 - [ ] **Step 3: Run extraction with real macOS OCR**
 
@@ -2868,7 +2909,7 @@ Write `docs/extraction-run-notes.md` containing:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add samples/sales-order-input.png tests/test_sample_run.py docs/extraction-run-notes.md docs/plans/2026-10-01-plan-1-core-and-extraction.md
+git add samples/ tests/test_sample_run.py docs/extraction-run-notes.md docs/plans/2026-10-01-plan-1-core-and-extraction.md
 git commit -m "docs: record first real extraction run on the supplied image"
 ```
 
