@@ -138,7 +138,10 @@ class Workbench:
         return wait_until(attempt, what=what, timeout=OPEN_TIMEOUT, poll=POLL, ignoring=(LocatorError,))
 
     def save(self, what: str) -> None:
-        """The toolbar Save, once; done when Save turns grey again."""
+        """The toolbar Save, once; done when Save turns grey again. Eclipse saves the active part,
+        which a search in the Documents list leaves on that list: a click on the editor's own tab
+        makes the editor active again first."""
+        self._focus_open_editor(what)
         save = self.toolbar_button("Save the current contents")
         if not save.enabled:
             raise NeedsReview("nothing_to_save", {"editor": what})
@@ -163,6 +166,12 @@ class Workbench:
 
     def dialog_open(self, title: str) -> bool:
         return any(w.title == title for w in self.ui.windows())
+
+    def _focus_open_editor(self, what: str) -> None:
+        selected = [tab for tab in self.editor_tabs() if _selected(tab)]
+        if len(selected) != 1:
+            raise NeedsReview("editor_tab", {"tab": what, "found": str(len(selected))})
+        self.ui.click(selected[0])
 
     def check_errors(self) -> None:
         errors = [w for w in self.ui.windows() if w.title == ERROR_DIALOG]
