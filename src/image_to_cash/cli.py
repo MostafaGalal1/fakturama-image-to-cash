@@ -166,7 +166,7 @@ def _drive(args: argparse.Namespace) -> int:
 
 
 def _batch(args: argparse.Namespace) -> int:
-    from image_to_cash.batch import STOPPED, run_batch
+    from image_to_cash.batch import DONE, STOPPED, run_batch
     from image_to_cash.drive.flow import drive
     from image_to_cash.drive.preflight import check_currency, load_order
 
@@ -200,8 +200,8 @@ def _batch(args: argparse.Namespace) -> int:
     if any(outcome.status == STOPPED and not outcome.cleared for outcome in outcomes):
         print("batch stopped: finish or discard Fakturama's open editors, then run it again", file=sys.stderr)
         return EXIT_REVIEW
-    if any(outcome.status == STOPPED for outcome in outcomes):
-        return EXIT_REVIEW  # the batch went on, but a stopped order still needs a person
+    if any(outcome.status != DONE for outcome in outcomes):
+        return EXIT_REVIEW  # the batch went on, but an image in review/ or stopped/ needs a person
     return EXIT_OK
 
 
