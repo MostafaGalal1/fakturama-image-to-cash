@@ -14,8 +14,10 @@ class Fakturama:
     """Editors (name -> how closing it asks: "clean", "parts" or "question") and open dialogs.
     The first editor is the active one. Records presses and anything saved."""
 
-    def __init__(self, editors, dialogs=(), stuck_tick=False, listed=None):
+    def __init__(self, editors, dialogs=(), stuck_tick=False, listed=None, stacked=0, tooltip=False):
         self.editors = dict(editors)
+        self.tooltip = tooltip  # an untitled window, as a tooltip over the clicked tab
+        self.stacked = stacked  # more "Save Parts" windows left open on top of the first
         self.dialogs = {title: {} for title in dialogs}
         self.stuck_tick, self.listed = stuck_tick, listed
         self.pressed, self.saved = [], []
@@ -56,7 +58,9 @@ class Fakturama:
             self.dialogs["Save Resource"] = {"editor": name}
 
     def windows(self):
-        return (Window(MAIN, AT), *(Window(title, AT) for title in self.dialogs))
+        extra = (Window("Save Parts", AT),) * self.stacked if "Save Parts" in self.dialogs else ()
+        tip = (Window("", AT),) if self.tooltip else ()
+        return (Window(MAIN, AT), *(Window(title, AT) for title in self.dialogs), *extra, *tip)
 
     def tree(self, window):
         state = self.dialogs[window.title]
@@ -79,6 +83,9 @@ class Fakturama:
             self.dialogs["Save Parts"]["ticked"] ^= not self.stuck_tick
             return
         title, button = element.handle
+        if title == "Save Parts" and button == "Cancel" and self.stacked:
+            self.stacked -= 1
+            return
         state = self.dialogs.pop(title)
         if button == "Cancel":
             return
@@ -135,3 +142,24 @@ def test_the_last_of_many_editors_is_checked_before_giving_up():
     """Live, macOS: ten saved editors closed, then the loop stopped without looking again."""
     editors = {f"Editor {i}": "clean" for i in range(10)}
     assert len(discard_editors(Fakturama(editors))) == 10
+
+
+def test_a_save_parts_list_left_open_is_cancelled_first():
+    """Live, Windows: an earlier close left "Save Parts" open. Cancel saves and closes nothing."""
+    fakturama = Fakturama({"New VAT": "parts"})
+    fakturama.press_menu(("File", "Close"))  # the earlier close, never answered
+    assert discard_editors(fakturama) == ("New VAT",)
+    assert fakturama.pressed[0] == "Cancel" and fakturama.saved == []
+
+
+def test_several_save_parts_lists_left_open_are_all_cancelled():
+    fakturama = Fakturama({"New VAT": "parts"}, stacked=2)
+    fakturama.press_menu(("File", "Close"))
+    assert discard_editors(fakturama) == ("New VAT",)
+    assert fakturama.pressed[:3] == ["Cancel", "Cancel", "Cancel"] and fakturama.saved == []
+
+
+def test_a_tooltip_is_not_a_dialog():
+    """Live, Windows at 100 %: the pointer rests on the clicked tab and its tooltip opens."""
+    fakturama = Fakturama({"New Order": "parts"}, tooltip=True)
+    assert discard_editors(fakturama) == ("New Order",) and fakturama.saved == []

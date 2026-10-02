@@ -2,7 +2,8 @@
 clean Fakturama (README "Unattended: a folder of orders").
 
 Only what the bot itself opens is answered:
-- its selectors are cancelled;
+- its selectors, and a "Save Parts" an earlier close left open, are cancelled (Cancel saves and
+  closes nothing);
 - each editor is closed on its own (File > Close). Fakturama then asks about that one editor,
   either with "Save Parts" listing it or with a question naming it. "Save Parts" gets OK only
   once its single box reads back unticked; the question gets No.
@@ -20,8 +21,8 @@ from image_to_cash.drive.locate import by_title
 from image_to_cash.drive.waits import WaitTimeout, wait_until
 from image_to_cash.errors import NeedsReview
 
-SELECTORS = frozenset({DEBTOR_SELECTOR, PRODUCT_SELECTOR})
 SAVE_PARTS = "Save Parts"
+CANCEL_FIRST = frozenset({DEBTOR_SELECTOR, PRODUCT_SELECTOR, SAVE_PARTS})
 UNTICKED = "0"
 MAX_EDITORS = 50
 CLOSE_TIMEOUT = 5.0
@@ -32,8 +33,7 @@ POLL = 0.2
 def discard_editors(wb: Workbench) -> tuple[str, ...]:
     """Closes every open editor without saving; returns their names in the order closed."""
     wb.ui.bring_to_front()
-    for dialog in _dialogs(wb):
-        _cancel_selector(wb, dialog)
+    _cancel_left_open(wb)
     closed: list[str] = []
     while tabs := wb.editor_tabs():
         if len(closed) == MAX_EDITORS:  # each close is read back, so this only bounds a surprise
@@ -42,11 +42,17 @@ def discard_editors(wb: Workbench) -> tuple[str, ...]:
     return tuple(closed)
 
 
-def _cancel_selector(wb: Workbench, dialog: Window) -> None:
-    if dialog.title not in SELECTORS:
-        raise NeedsReview("dialog_open", {"dialog": dialog.title})
-    wb.ui.press(by_title(wb.ui.tree(dialog), Role.BUTTON, "Cancel"))
-    wait_until(lambda: not wb.dialog_open(dialog.title), what=f"'{dialog.title}' to close", timeout=CLOSE_TIMEOUT, poll=POLL)
+def _cancel_left_open(wb: Workbench) -> None:
+    """One at a time: several windows of one title can be open (earlier closes, each unanswered)."""
+    for _ in range(MAX_EDITORS):
+        dialogs = _dialogs(wb)
+        if not dialogs:
+            return
+        if dialogs[0].title not in CANCEL_FIRST:
+            raise NeedsReview("dialog_open", {"dialog": dialogs[0].title})
+        wb.ui.press(by_title(wb.ui.tree(dialogs[0]), Role.BUTTON, "Cancel"))
+        wait_until(lambda: len(_dialogs(wb)) < len(dialogs), what=f"'{dialogs[0].title}' to close", timeout=CLOSE_TIMEOUT, poll=POLL)
+    raise NeedsReview("dialogs_left_open", {"dialogs": str(len(_dialogs(wb)))})
 
 
 def _close_active(wb: Workbench, open_editors: int) -> str:
@@ -111,4 +117,5 @@ def _has_button(controls: tuple[Element, ...], title: str) -> bool:
 
 
 def _dialogs(wb: Workbench) -> tuple[Window, ...]:
-    return tuple(w for w in wb.ui.windows() if not w.title.startswith(MAIN_TITLE_PREFIX))
+    """Fakturama's dialogs all have titles; an untitled window is a tooltip."""
+    return tuple(w for w in wb.ui.windows() if w.title and not w.title.startswith(MAIN_TITLE_PREFIX))
