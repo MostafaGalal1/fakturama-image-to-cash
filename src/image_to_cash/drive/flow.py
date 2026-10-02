@@ -8,6 +8,7 @@ Any NeedsReview stops the run with a screenshot and a log line; nothing is guess
 
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from image_to_cash.errors import NeedsReview
 from image_to_cash.normalized import NormalizedOrder
 from image_to_cash.ocr.base import OcrEngine
 
+WHERE_FRAMES = 4  # enough to name the step and the call that failed
+
 
 @dataclass(frozen=True)
 class DriveResult:
@@ -41,9 +44,15 @@ def drive(order: NormalizedOrder, backend: UiBackend, ocr: OcrEngine, out_dir: P
         _try_shot(ctx, "stopped")
         raise
     except Exception as error:  # an unexpected failure is still a stop, with the same evidence
-        ctx.record("stopped", Outcome.STOPPED, reason="unexpected_error", error=type(error).__name__, message=str(error)[:200])
+        ctx.record("stopped", Outcome.STOPPED, reason="unexpected_error", error=type(error).__name__, message=str(error)[:200], where=where(error))
         _try_shot(ctx, "stopped")
         raise
+
+
+def where(error: BaseException) -> str:
+    """The innermost frames of this package, so an unexpected stop names the code that failed."""
+    frames = [f for f in traceback.extract_tb(error.__traceback__) if f"{Path('image_to_cash')}" in f.filename]
+    return " < ".join(f"{Path(f.filename).name}:{f.lineno}" for f in reversed(frames[-WHERE_FRAMES:]))
 
 
 def _run(ctx: Context, order: NormalizedOrder) -> DriveResult:

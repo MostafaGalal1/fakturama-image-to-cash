@@ -45,6 +45,12 @@ def _inside(child: Frame, parent: Frame) -> bool:
     return parent[0] <= child[0] and parent[1] <= child[1] and child[2] <= parent[2] and child[3] <= parent[3]
 
 
+def focus_owner(pid: int | None) -> int | None:
+    """The process holding the keyboard focus. UI Automation answers pid 0 (the desktop) while no
+    window holds it, as right after a dialog closes itself: that is no answer, not another app."""
+    return pid or None
+
+
 def menu_label(raw: str) -> str:
     """A Win32 menu item's text as a person reads it: "&Close All\\tCtrl+Shift+W" -> "Close All"."""
     text = raw.split("\t", 1)[0]

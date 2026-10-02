@@ -30,7 +30,7 @@ from image_to_cash.drive.backend.base import BackendError, FocusNotTaken, Unsafe
 from image_to_cash.drive.backend.keys import parse_chord  # noqa: E402
 from image_to_cash.drive.backend.safety import require_copied_text, require_keyboard, wait_until_frontmost  # noqa: E402
 from image_to_cash.drive.backend.uia_roles import UiaRecord, element_from_uia  # noqa: E402
-from image_to_cash.drive.backend.win_units import Scale  # noqa: E402
+from image_to_cash.drive.backend.win_units import Scale, focus_owner  # noqa: E402
 from image_to_cash.drive.backend.window_capture import NORMAL_WINDOW_LAYER, WindowInfo, crop_box, window_for  # noqa: E402
 from image_to_cash.drive.elements import Element, Rect, Role, Window, distinct  # noqa: E402
 from image_to_cash.drive.layout import WINDOWS_LAYOUT  # noqa: E402
@@ -285,7 +285,7 @@ class WindowsUiaBackend:
 
     def _focused_pid(self) -> int | None:
         handle = self._focused_control()
-        return None if handle is None else _safe(lambda: handle.ProcessId)
+        return None if handle is None else focus_owner(_safe(lambda: handle.ProcessId))
 
     def _clicked_has_focus(self) -> bool:
         return self._clicked is not None and _is_within(self._focused_control(), self._clicked)

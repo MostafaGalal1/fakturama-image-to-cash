@@ -1,6 +1,6 @@
 import pytest
 
-from image_to_cash.drive.backend.win_units import Scale, menu_label
+from image_to_cash.drive.backend.win_units import Scale, menu_label, focus_owner
 from image_to_cash.drive.elements import Rect
 
 
@@ -42,3 +42,9 @@ def test_a_child_already_in_pixels_is_left_alone():
 def test_a_child_that_fits_neither_way_is_left_alone():
     scale = Scale.from_dpi(192)
     assert scale.child_frame((10, 10, 20, 20), (612, 994, 3024, 1572)) == (10, 10, 20, 20)
+
+
+def test_pid_zero_means_nothing_holds_the_focus():
+    assert focus_owner(0) is None
+    assert focus_owner(None) is None
+    assert focus_owner(5640) == 5640
