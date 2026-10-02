@@ -7,10 +7,11 @@ from image_to_cash.drive.fakturama.context import Context
 from image_to_cash.drive.fakturama.copied import DocumentRow, DocumentState, parse_document_rows
 from image_to_cash.drive.fakturama.fields import choose_option, set_amount, set_date, shown
 from image_to_cash.drive.fakturama.lists import search_until
-from image_to_cash.drive.fakturama.order import PRICE_MODE_HELP, VAT_MODE_HELP, InvoiceEditor
+from image_to_cash.drive.fakturama.order import InvoiceEditor
 from image_to_cash.drive.fakturama.rules import address_lines_match, check_document, check_line
 from image_to_cash.drive.formats import parse_display_date
-from image_to_cash.drive.locate import by_help, right_of_label
+from image_to_cash.drive.fakturama import controls as find
+from image_to_cash.drive.locate import right_of_label
 from image_to_cash.drive.report import Outcome
 from image_to_cash.drive.waits import wait_until
 from image_to_cash.errors import NeedsReview
@@ -27,8 +28,8 @@ def check_copied_from_order(invoice: InvoiceEditor, order: NormalizedOrder) -> N
     checks = {
         "cust_ref": shown(ui, right_of_label(controls, "Cust.Ref.")) == order.external_reference,
         "order_date": parse_display_date(shown(ui, right_of_label(controls, "Order Date"))) == order.order_date,
-        "price_mode": shown(ui, by_help(controls, Role.POPUP, PRICE_MODE_HELP)) == "Net",
-        "vat_mode": shown(ui, by_help(controls, Role.POPUP, VAT_MODE_HELP)) == "With VAT",
+        "price_mode": shown(ui, find.price_mode(controls)) == "Net",
+        "vat_mode": shown(ui, find.vat_mode(controls)) == "With VAT",
     }
     invoice_text, delivery_text = invoice.address_texts()
     checks["invoice_address"] = address_lines_match(invoice_text, order.debtor, order.debtor.billing_address)
@@ -63,13 +64,13 @@ def record_payment(invoice: InvoiceEditor, order: NormalizedOrder) -> None:
     row, _ = wait_until(
         lambda: _with_value_field(invoice.payment_row()), what="the payment date and value", timeout=5, poll=0.3, ignoring=(LookupError,)
     )
-    set_date(ctx.ui, by_help(row, Role.TEXT_FIELD, "Date of the payment"), order.payment.payment_date, label="payment_date")
-    set_amount(ctx.ui, by_help(row, Role.TEXT_FIELD, "The paid value"), order.totals.gross, label="paid_value")
+    set_date(ctx.ui, find.payment_date(row), order.payment.payment_date, label="payment_date")
+    set_amount(ctx.ui, find.paid_value(row), order.totals.gross, label="paid_value")
 
 
 def _with_value_field(found):
     row, paid = found
-    by_help(row, Role.TEXT_FIELD, "The paid value")  # raises LookupError until shown
+    find.paid_value(row)  # raises LookupError until shown
     return row, paid
 
 

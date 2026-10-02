@@ -1,7 +1,7 @@
 import pytest
 
 from image_to_cash.drive.backend.base import BackendError, UnsafeToAct
-from image_to_cash.drive.backend.keys import MAC_KEY_CODES, Chord, parse_chord
+from image_to_cash.drive.backend.keys import MAC_KEY_CODES, MODIFIERS, WIN_MODIFIER_VK, WIN_VK_CODES, Chord, parse_chord
 from image_to_cash.drive.backend.safety import (
     is_within,
     require_copied_text,
@@ -37,6 +37,17 @@ def test_every_parseable_key_has_a_mac_key_code():
         assert key in MAC_KEY_CODES
         assert parse_chord(key).key == key
 
+
+
+def test_windows_has_a_key_code_for_every_mac_key():
+    assert set(WIN_VK_CODES) == set(MAC_KEY_CODES)
+    assert set(WIN_MODIFIER_VK) == MODIFIERS
+
+
+def test_windows_key_codes_match_the_keys_they_name():
+    assert WIN_VK_CODES["a"] == 0x41 and WIN_VK_CODES["z"] == 0x5A and WIN_VK_CODES["7"] == 0x37
+    assert WIN_VK_CODES["delete"] == 0x08  # the Mac's delete key is Backspace
+    assert WIN_MODIFIER_VK["primary"] == WIN_MODIFIER_VK["ctrl"] == 0x11
 
 def test_input_is_allowed_only_while_fakturama_is_frontmost():
     require_frontmost(FAKTURAMA, FAKTURAMA)

@@ -21,13 +21,13 @@ T = TypeVar("T")
 
 MAIN_TITLE_PREFIX = "Fakturama - "
 ERROR_DIALOG = "Internal Error"
-TAB_STRIP = 26  # a tab folder's tab row; its view toolbar sits at its right end
-NAV_ITEMS_AREA = Rect(20, 560, 280, 100)  # the left panel's "New" group
 OPEN_TIMEOUT = 30
 SAVE_TIMEOUT = 15
 DIALOG_TIMEOUT = 10
 POLL = 0.5
 
+
+TOOLBAR_ROW = 10.0  # points: buttons of one toolbar row share their top
 
 class Workbench:
     def __init__(self, backend: UiBackend, shots: Path) -> None:
@@ -44,7 +44,11 @@ class Workbench:
         return found[0]
 
     def _folders(self) -> tuple[Rect, Rect]:
-        groups = [e.rect for e in self.ui.tree(self.main_window()) if e.role is Role.TAB_GROUP]
+        """The editor folder on top and the list views below. Tab folders inside an editor (a
+        Debtor's "Addresses") are left out: they start within one of these two, right of its
+        left edge, and may reach past it (scrolled below the visible editor)."""
+        found = [e.rect for e in self.ui.tree(self.main_window()) if e.role is Role.TAB_GROUP]
+        groups = [rect for rect in found if not any(_inner(rect, other) for other in found)]
         if len(groups) != 2:
             raise NeedsReview("fakturama_layout", {"tab_folders": str(len(groups))})
         top, bottom = sorted(groups, key=lambda rect: rect.y)
@@ -52,31 +56,29 @@ class Workbench:
 
     def editor_area(self) -> Rect:
         top, _ = self._folders()
-        return Rect(top.x, top.y + TAB_STRIP, top.width, top.height - TAB_STRIP)
+        return Rect(top.x, top.y + self.ui.layout.tab_strip, top.width, top.height - self.ui.layout.tab_strip)
 
     def view_area(self) -> Rect:
         _, bottom = self._folders()
-        return Rect(bottom.x, bottom.y + TAB_STRIP, bottom.width, bottom.height - TAB_STRIP)
+        return Rect(bottom.x, bottom.y + self.ui.layout.tab_strip, bottom.width, bottom.height - self.ui.layout.tab_strip)
 
     def view_toolbar(self) -> tuple[Element, ...]:
         _, bottom = self._folders()
-        return self.ui.scan(Rect(bottom.x, bottom.y, bottom.width, TAB_STRIP))
+        return self.ui.scan(Rect(bottom.x, bottom.y, bottom.width, self.ui.layout.tab_strip))
 
     def editor_tabs(self) -> tuple[Element, ...]:
         top, _ = self._folders()
-        return tuple(e for e in self.ui.scan(Rect(top.x, top.y, top.width, TAB_STRIP)) if e.role is Role.RADIO)
+        return tuple(e for e in self.ui.scan(Rect(top.x, top.y, top.width, self.ui.layout.tab_strip)) if e.role is Role.RADIO)
 
     # Toolbar, tabs and navigation.
 
     def toolbar_button(self, help_text: str) -> Element:
         """A main-toolbar button by its tooltip. Buttons inside editors share some tooltips
-        (an Order's follow-up "Create: New Invoice"), so only the strip above the editors counts."""
-        top, _ = self._folders()
-        buttons = [
-            e
-            for e in self.ui.tree(self.main_window())
-            if e.role is Role.BUTTON and e.help == help_text and e.rect.bottom <= top.y
-        ]
+        (an Order's follow-up "Create: New Invoice"), so only the topmost row counts: the main
+        toolbar lies above every editor, and this works with no editor open."""
+        found = [e for e in self.ui.tree(self.main_window()) if e.role is Role.BUTTON and e.help == help_text]
+        top = min((e.rect.y for e in found), default=0.0)
+        buttons = [e for e in found if e.rect.y <= top + TOOLBAR_ROW]
         if len(buttons) != 1:
             raise NeedsReview("toolbar_button", {"help": help_text, "found": str(len(buttons))})
         return buttons[0]
@@ -109,7 +111,7 @@ class Workbench:
         more click is allowed when nothing opened."""
         for _ in range(2):
             item = wait_until(
-                lambda: label(self.ui.scan(NAV_ITEMS_AREA), text), what=f"'{text}'", timeout=10, poll=POLL, ignoring=(LocatorError,)
+                lambda: label(self.ui.scan(self._nav_area()), text), what=f"'{text}'", timeout=10, poll=POLL, ignoring=(LocatorError,)
             )
             self.ui.click(item)
             try:
@@ -118,6 +120,10 @@ class Workbench:
             except WaitTimeout:
                 self.check_errors()
         raise NeedsReview("navigation_failed", {"item": text})
+
+    def _nav_area(self) -> Rect:
+        window, nav = self.main_window().rect, self.ui.layout.nav_area
+        return Rect(window.x + nav.x, window.y + nav.y, nav.width, nav.height)
 
     # Editors.
 
@@ -132,7 +138,10 @@ class Workbench:
         return wait_until(attempt, what=what, timeout=OPEN_TIMEOUT, poll=POLL, ignoring=(LocatorError,))
 
     def save(self, what: str) -> None:
-        """The toolbar Save, once; done when Save turns grey again."""
+        """The toolbar Save, once; done when Save turns grey again. Eclipse saves the active part,
+        which a search in the Documents list leaves on that list: a click on the editor's own tab
+        makes the editor active again first."""
+        self._focus_open_editor(what)
         save = self.toolbar_button("Save the current contents")
         if not save.enabled:
             raise NeedsReview("nothing_to_save", {"editor": what})
@@ -158,6 +167,12 @@ class Workbench:
     def dialog_open(self, title: str) -> bool:
         return any(w.title == title for w in self.ui.windows())
 
+    def _focus_open_editor(self, what: str) -> None:
+        selected = [tab for tab in self.editor_tabs() if _selected(tab)]
+        if len(selected) != 1:
+            raise NeedsReview("editor_tab", {"tab": what, "found": str(len(selected))})
+        self.ui.click(selected[0])
+
     def check_errors(self) -> None:
         errors = [w for w in self.ui.windows() if w.title == ERROR_DIALOG]
         if not errors:
@@ -171,6 +186,10 @@ class Workbench:
     def shot(self, name: str) -> Path:
         self._shot_count += 1
         return self.ui.capture(self.main_window().rect, self._shots / f"{self._shot_count:02d}-{name}.png")
+
+
+def _inner(rect: Rect, outer: Rect) -> bool:
+    return rect != outer and (outer.contains(rect) or (outer.holds(rect.x, rect.y) and rect.x > outer.x))
 
 
 def _selected(tab: Element) -> bool:

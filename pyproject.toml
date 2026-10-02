@@ -11,6 +11,16 @@ dependencies = [
     "pyobjc-framework-applicationservices>=10.3 ; sys_platform == 'darwin'",
     "pyobjc-framework-cocoa>=10.3 ; sys_platform == 'darwin'",
     "pyobjc-framework-quartz>=10.3 ; sys_platform == 'darwin'",
+    "uiautomation>=2.0.20 ; sys_platform == 'win32'",
+    "comtypes>=1.4 ; sys_platform == 'win32'",
+    "winrt-runtime>=2.0 ; sys_platform == 'win32'",
+    "winrt-Windows.Foundation>=2.0 ; sys_platform == 'win32'",
+    "winrt-Windows.Foundation.Collections>=2.0 ; sys_platform == 'win32'",
+    "winrt-Windows.Globalization>=2.0 ; sys_platform == 'win32'",
+    "winrt-Windows.Graphics.Imaging>=2.0 ; sys_platform == 'win32'",
+    "winrt-Windows.Media.Ocr>=2.0 ; sys_platform == 'win32'",
+    "winrt-Windows.Security.Cryptography>=2.0 ; sys_platform == 'win32'",
+    "winrt-Windows.Storage.Streams>=2.0 ; sys_platform == 'win32'",
 ]
 
 [project.scripts]
@@ -29,4 +39,7 @@ packages = ["src/image_to_cash"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-markers = ["macos: needs macOS system frameworks (Vision, Accessibility)"]
+markers = [
+    "macos: needs macOS system frameworks (Vision, Accessibility)",
+    "windows: needs Windows (UI Automation, Win32, Windows OCR)",
+]

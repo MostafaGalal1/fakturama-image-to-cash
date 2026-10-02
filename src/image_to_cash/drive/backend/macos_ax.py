@@ -33,6 +33,7 @@ from image_to_cash.drive.backend.keys import MAC_KEY_CODES, parse_chord
 from image_to_cash.drive.backend.safety import is_within, require_copied_text, require_keyboard, wait_until_frontmost
 from image_to_cash.drive.backend.window_capture import NORMAL_WINDOW_LAYER, WindowInfo, crop_box, window_for
 from image_to_cash.drive.elements import Element, Rect, Window, distinct
+from image_to_cash.drive.layout import MAC_LAYOUT
 from image_to_cash.drive.waits import WaitTimeout, wait_until
 
 BUNDLE_ID = "Fakturama.ID"
@@ -62,6 +63,8 @@ MODIFIER_FLAGS = {
 
 
 class MacAxBackend:
+    layout = MAC_LAYOUT
+
     def __init__(self, pid: int) -> None:
         self._pid = pid
         self._app = AX.AXUIElementCreateApplication(pid)

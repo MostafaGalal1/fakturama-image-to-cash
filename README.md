@@ -14,7 +14,11 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
   Order-first flow through the macOS Accessibility API: Order, Debtor (select or create, with its
   payment method), Products (select or create, with their VAT), save, the linked Invoice, the paid
   status, and verification in Data > Documents. Findings: [docs/spike-macos-ax.md](docs/spike-macos-ax.md).
-- **Windows:** the UI Automation and OCR adapters are designed for but not yet built.
+- **Windows: green end to end** in a Windows 11 ARM VM (Parallels) on this Mac, on the same
+  `order.json`: Order PO000002 and Invoice INV000002 saved, the Invoice paid, both verified in
+  Data > Documents, in about 1.5 minutes. Earlier runs on the same database covered the create
+  paths: payment method, Debtor with a separate delivery address, and both Products. See
+  [Stage 2 on Windows](#stage-2-on-windows).
 
 ## Setup (macOS)
 
@@ -161,6 +165,128 @@ Annotated screenshots of that run, in order:
 - **Grids are read through the clipboard** (saved and restored around each copy), never by OCR;
   OCR only confirms a grid has a first row, because copying an empty grid crashes Fakturama.
 
+## Stage 2 on Windows
+
+The flow is the same code. Only the backend changes:
+
+- **UI Automation** (the `uiautomation` package) reads the controls.
+- **Win32 through ctypes** does the rest:
+  - menus run by command id (`WM_COMMAND`), without opening;
+  - native buttons are pressed with `BM_CLICK`;
+  - clicks and keys go through `SendInput`;
+  - the clipboard is saved and restored around each grid copy;
+  - screenshots come from `PrintWindow` of Fakturama's own window.
+- **Windows OCR** (`Windows.Media.Ocr`) is local and needs no account.
+
+Code: `src/image_to_cash/drive/backend/windows_uia.py`, `win32_api.py`, `uia_roles.py`,
+`src/image_to_cash/ocr/windows_ocr.py`.
+
+The safety rule is the macOS one. A click or keystroke is sent only while Fakturama owns the
+foreground window and the keyboard focus, so Windows also needs Fakturama in front while it types.
+To keep a person's own desktop free, run the bot in a VM or a separate Windows session.
+
+### Test it from a Mac (Apple silicon)
+
+1. **Make a Windows 11 ARM VM.** Use Parallels Desktop (its wizard downloads Windows), VMware
+   Fusion, or UTM (free; it needs Microsoft's Windows 11 ARM64 ISO). Give it at least 4 GB of RAM.
+   In Windows, set screen and sleep to *Never* (*Settings > System > Power*): a locked screen
+   blocks input.
+2. **Install in the VM:**
+   - Fakturama 2.2 for Windows. It is x64 and runs under Windows' built-in emulation. Create its
+     workspace and set *Settings… > General > Currency locale* = **Germany**. Quit and restart it
+     once, because the preference file the bot checks is written on quit.
+   - [Git for Windows](https://git-scm.com/download/win).
+   - [uv](https://docs.astral.sh/uv/getting-started/installation/): run
+     `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`.
+
+   Every compiled dependency has a native Windows ARM64 wheel.
+3. **Copy the code and an order in.** On the Mac, bundle the repository:
+
+   ```bash
+   git bundle create ~/Desktop/fakturama-image-to-cash.bundle --all
+   ```
+
+   Copy that file and `out/clean-live/order.json` into the VM through its shared folder. Leave
+   `.env` behind: `drive` does not use the OpenRouter key. Then, in PowerShell in the VM:
+
+   ```powershell
+   git clone -b feat/windows-backend fakturama-image-to-cash.bundle fakturama-image-to-cash
+   cd fakturama-image-to-cash
+   uv sync
+   uv run pytest -q
+   ```
+
+   The unit tests pass, and the macOS-only tests skip.
+4. **Run the live contract test.** Open Fakturama on its start page, then keep your hands off the
+   VM:
+
+   ```powershell
+   $env:FAKTURAMA_LIVE = "1"
+   uv run pytest tests/test_windows_uia_contract.py -s -v
+   ```
+
+   It does five things:
+   - lists the main window;
+   - finds the editor and list folders;
+   - finds the two toolbar buttons the flow presses, by tooltip;
+   - types into a New VAT editor and reads the text back, then picks a pop-up option and
+     captures the window;
+   - prints a calibration report: tab folders, buttons with their tooltips, and the grid panes.
+
+   Compare the report with `WINDOWS_LAYOUT` in `src/image_to_cash/drive/layout.py` and fix the
+   values that differ. The test closes every editor it opens without saving.
+5. **Do a full run**, with Fakturama on its start page and hands off the VM:
+
+   ```powershell
+   uv run image-to-cash drive order.json --out out\drive
+   ```
+
+   The exit codes and outputs (`run.jsonl`, `screens\`) are the macOS ones. You can use the Mac's
+   other apps while it runs, as long as you don't click into the VM. Make sure the VM is not set to
+   pause in the background.
+
+### What the live Windows runs taught
+
+Fixed in the code:
+
+- **Tooltips:** fields, pop-ups and icons show no tooltips to UI Automation; toolbar buttons
+  carry theirs as their name. `drive/fakturama/controls.py` finds each control by tooltip, else
+  by its label, its values or its place (a section's first icon).
+- **Labels:** a label is only as wide as its text, so a field's distance is measured from the
+  label column's right edge.
+- **Hidden controls:** SWT's tab folders and links claim to be offscreen while shown, so hiding is
+  read from window visibility. Tab headers report their frames in points at high DPI.
+- **Clipboard deadlock:** the clipboard's owner window must answer messages. It runs on its own
+  thread; otherwise Fakturama's copy (and Parallels' clipboard sync) waited on it with the
+  clipboard locked.
+- **Start of a run:** the bot keeps the display on, wakes it, and minimizes its own terminal,
+  which otherwise covered Fakturama.
+- **"Save Parts":** it lists the parts as rows whose ticks Windows does not report, so nothing
+  presses its OK. The contract test closes editors one by one instead.
+- **Tabs:** UI Automation hit-tests a tab folder, not the windowless tab in it, so the click
+  guard accepts the folder that draws the tab.
+- **Focus:** right after a dialog closes itself, UI Automation names pid 0 (the desktop) as the
+  focus owner. That counts as no answer; the front-window check still decides.
+- **Self-closing selector:** the Debtor selector can accept its single hit by itself while the
+  bot copies its grid. Keys now refuse once the clicked control has gone (they had reached the
+  Order's price-mode box), and a selector that closed by itself counts as picked; the addresses
+  then decide.
+- **Double clicks:** two single clicks on the same grid row within Windows' double-click time
+  made a double click, which accepted the row. A single click now waits that time out.
+- **Role window:** the "address type" ▶ reopens its window on Windows, so Escape closes it.
+- **Save:** Eclipse saves the active part, and the Documents search left that list active, so
+  Save on the Invoice did nothing. Save now clicks the open editor's tab first.
+- **Stops:** an unexpected stop records where it failed (`where` in `run.jsonl`).
+
+Still open:
+
+- **Editor height:** at 200 % scaling the editor shows about 385 points, so a Debtor's "address
+  type" row is out of view. Use 100–150 % scaling, or drag Fakturama's divider between the
+  editor and the lists lower (done once in the VM; Fakturama keeps it). The flow does not scroll
+  editors yet.
+- **Row header:** `row_header_dx` (12 points) is a guess. It works: every order line was copied
+  back and checked.
+
 ## Known limitations
 
 - Names, email, descriptions, quantities, cities and the payment method are not cross-checked by
@@ -169,8 +295,9 @@ Annotated screenshots of that run, in order:
   straight to review.
 - Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
   stopped them, but they are not usable as readers.
-- Stage 2 runs on macOS only. The flow talks to a `UiBackend` protocol; a Windows UI Automation
-  backend is designed (DESIGN.md) but not built.
+- Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % scaling. Other
+  Windows scalings and x64 PCs have not been tried (see
+  [what the live Windows runs taught](#what-the-live-windows-runs-taught)).
 - A stop is not resumable. Master data saved before the stop (VAT, payment method, Debtor,
   Products) is found and reused on the next run, but an Order saved before a stop would be entered
   again, so restore the database backup after a stop past the Order's save.
@@ -192,7 +319,8 @@ In priority order, each item is about trust in an unattended run:
    and stops on the near miss. The VAT reuse branch should also open the existing rate and check
    its code is S (brief §3.5); today only the creation branch checks it.
 3. **Measure grid geometry instead of assuming it**: the row pitch by OCR once per grid.
-4. **The Windows UI Automation backend**, against the same contract tests, since the brief's
-   reference platform is Windows and SWT exposes more of its tree there.
+4. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
+   Windows 11 ARM VM at 200 % scaling. Next: an x64 PC at 100 % and 150 %, measure
+   `row_header_dx`, and scroll editors so the flow does not depend on the editor's height.
 5. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
    values, annotated screenshots) for whoever reviews a stopped run.

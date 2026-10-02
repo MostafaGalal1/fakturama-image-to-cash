@@ -16,13 +16,17 @@ SAMPLE_ORDER_JSON = FIXTURES / "sample_order.json"
 AX_FIXTURES = FIXTURES / "ax"  # accessibility snapshots of blank Fakturama editors
 
 
+PLATFORM_MARKERS = {"macos": "darwin", "windows": "win32"}
+
+
 def pytest_collection_modifyitems(config, items):
-    if sys.platform == "darwin":
-        return
-    skip_macos = pytest.mark.skip(reason="macOS only")
-    for item in items:
-        if "macos" in item.keywords:
-            item.add_marker(skip_macos)
+    for marker, platform in PLATFORM_MARKERS.items():
+        if sys.platform == platform:
+            continue
+        skip = pytest.mark.skip(reason=f"{marker} only")
+        for item in items:
+            if marker in item.keywords:
+                item.add_marker(skip)
 
 
 class FakeOcr:

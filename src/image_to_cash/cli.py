@@ -5,17 +5,19 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from image_to_cash.drive.backend.base import UiBackend
 from image_to_cash.errors import NeedsReview
 from image_to_cash.extract import extract
 from image_to_cash.invariants import check_invariants
 from image_to_cash.model import Order
 from image_to_cash.normalized import normalize
-from image_to_cash.ocr import ENGINES, OcrError, build_ocr
+from image_to_cash.ocr import DEFAULT_ENGINE, ENGINES, OcrEngine, OcrError, build_ocr
 from image_to_cash.outputs import ORDER_FILE, clear_results, discard_order, write_order, write_result
 from image_to_cash.readers import READERS, ReaderError, build_reader
 from image_to_cash.readers.base import describe_validation_error
@@ -41,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract_cmd.add_argument(
         "--model", help=f"OpenRouter model for --reader openrouter (default {DEFAULT_MODEL})"
     )
-    extract_cmd.add_argument("--ocr", default="macos-vision", choices=ENGINES)
+    extract_cmd.add_argument("--ocr", default=DEFAULT_ENGINE, choices=ENGINES)
     extract_cmd.add_argument(
         "--out", type=Path, default=Path("out"), help="result folder; cleared of order.json and review.json first"
     )
@@ -85,7 +87,7 @@ def _extract(args: argparse.Namespace) -> int:
             f"{len(result.issues)} issue(s); see {target}"
         )
         print(f"  check every field of draft_order against {result.source_image}, correct it, then run:")
-        print(f"  image-to-cash approve {shlex.quote(str(target))} --out {shlex.quote(str(args.out))}")
+        print(f"  image-to-cash approve {shell_arg(str(target))} --out {shell_arg(str(args.out))}")
         return EXIT_REVIEW
     print(f"order written to {target}")
     return EXIT_OK
@@ -128,15 +130,14 @@ def _approve(args: argparse.Namespace) -> int:
 
 
 def _drive(args: argparse.Namespace) -> int:
-    """Imported here: the macOS adapter needs pyobjc and Accessibility access, extract does not."""
-    from image_to_cash.drive.backend.macos_ax import MacAxBackend
     from image_to_cash.drive.flow import drive
     from image_to_cash.drive.preflight import check_currency, load_order
 
     order = load_order(args.order)
     try:
         check_currency()
-        result = drive(order, MacAxBackend.attach(), build_ocr("macos-vision"), args.out)
+        backend, ocr = _driver()
+        result = drive(order, backend, ocr, args.out)
     except NeedsReview as review:
         print(f"stopped for review: {review}; see {args.out / 'run.jsonl'}", file=sys.stderr)
         return EXIT_REVIEW
@@ -146,6 +147,29 @@ def _drive(args: argparse.Namespace) -> int:
     print(f"order {result.order_number} and invoice {result.invoice_number} saved and verified; see {args.out}")
     return EXIT_OK
 
+
+def _driver() -> tuple[UiBackend, OcrEngine]:
+    """This OS's adapter and OCR, imported here: each needs its own packages and permissions, and
+    extract needs neither. Grid headers are read word by word, so Windows OCR returns words."""
+    try:
+        if sys.platform == "darwin":
+            from image_to_cash.drive.backend.macos_ax import MacAxBackend
+
+            return MacAxBackend.attach(), build_ocr("macos-vision")
+        if sys.platform == "win32":
+            from image_to_cash.drive.backend.windows_uia import WindowsUiaBackend
+            from image_to_cash.ocr.windows_ocr import WindowsOcr
+
+            return WindowsUiaBackend.attach(), WindowsOcr(words=True)
+    except ImportError as error:
+        raise RuntimeError(f"the {sys.platform} adapter is not installed ({error}); run uv sync") from error
+    raise RuntimeError(f"drive runs on macOS and Windows, not {sys.platform}")
+
+
+def shell_arg(text: str, platform: str = sys.platform) -> str:
+    """`text` as one argument of a command a person pastes: POSIX quoting on macOS, Windows'
+    (understood by cmd and PowerShell alike) on Windows."""
+    return subprocess.list2cmdline([text]) if platform == "win32" else shlex.quote(text)
 
 if __name__ == "__main__":
     sys.exit(main())

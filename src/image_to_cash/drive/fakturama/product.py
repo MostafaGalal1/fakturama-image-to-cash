@@ -13,7 +13,8 @@ from image_to_cash.drive.fakturama.fields import choose_option, set_amount, show
 from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, has_rows, select_row
 from image_to_cash.drive.fakturama.order import OrderEditor
 from image_to_cash.drive.fakturama.rules import decide_product, vat_name
-from image_to_cash.drive.locate import by_help, by_title, right_of_label
+from image_to_cash.drive.fakturama import controls as find
+from image_to_cash.drive.locate import by_title, right_of_label
 from image_to_cash.drive.report import Outcome
 from image_to_cash.drive.waits import wait_until
 from image_to_cash.errors import NeedsReview
@@ -31,7 +32,7 @@ class Picked(StrEnum):
 def select_product(ctx: Context, order: OrderEditor, product: Product, *, lines_before: int) -> Picked:
     """Brief §3.2-3.3. On SELECTED the Order has exactly one more line, holding this SKU."""
     order.activate()
-    ctx.ui.click(by_help(order.scan(), Role.IMAGE, "Pick an item from the list"))
+    ctx.ui.click(find.item_picker(order.scan()))
     dialog = ctx.wb.wait_dialog(SELECTOR)
     controls = ctx.ui.tree(dialog)
     search = right_of_label(controls, "Search:")
@@ -53,7 +54,7 @@ def select_product(ctx: Context, order: OrderEditor, product: Product, *, lines_
 
 
 def _pick_row(ctx: Context, controls: tuple[Element, ...], product: Product) -> bool:
-    grids = sorted((e for e in controls if e.role is Role.OTHER and e.rect.height > 200), key=lambda e: e.rect.width)
+    grids = sorted((e for e in controls if e.role is Role.OTHER and e.rect.height > 200), key=lambda e: (e.rect.width, e.rect.height))  # the innermost: a grid sits below its search row
     if not grids:
         raise NeedsReview("grid_not_found", {"grid": SELECTOR})
     grid = grids[0]
@@ -79,7 +80,7 @@ def create_product(ctx: Context, product: Product) -> None:
     choose_option(ctx.ui, right_of_label(fields, "VAT", role=Role.POPUP), vat_name(product.vat_percent), label="product_vat")
     set_text(ctx.ui, right_of_label(fields, "Item Number"), product.sku, label="item_number")
     set_text(ctx.ui, right_of_label(fields, "Name"), product.description, label="product_name")
-    set_text(ctx.ui, by_help(fields, Role.TEXT_AREA, "Additional description"), product.description, label="product_description", commit=None)
+    set_text(ctx.ui, find.product_description(fields), product.description, label="product_description", commit=None)
     set_amount(ctx.ui, right_of_label(fields, "Price (gross)"), product.gross_price, label="gross_price")
     set_amount(ctx.ui, right_of_label(fields, "cost price (net)"), Decimal(0), label="cost_price")
     set_text(ctx.ui, right_of_label(fields, "Stock"), "0.00", label="stock")

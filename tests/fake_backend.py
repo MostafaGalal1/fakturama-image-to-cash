@@ -7,9 +7,12 @@ from dataclasses import replace
 from pathlib import Path
 
 from image_to_cash.drive.elements import Element, Rect, Window
+from image_to_cash.drive.layout import MAC_LAYOUT
 
 
 class FakeBackend:
+    layout = MAC_LAYOUT
+
     def __init__(self, display: Callable[[str], str] = lambda typed: typed) -> None:
         """`display` turns what was typed into what the field shows after Tab."""
         self.calls: list[tuple[str, object]] = []

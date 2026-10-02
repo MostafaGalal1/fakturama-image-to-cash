@@ -226,3 +226,16 @@ def test_extract_help_names_the_default_model(capsys):
     help_text = " ".join(capsys.readouterr().out.split())
     assert "--model" in help_text
     assert DEFAULT_MODEL in help_text
+
+
+@pytest.mark.parametrize(
+    ("platform", "path", "shown"),
+    [
+        ("darwin", "/tmp/out dir/review.json", "'/tmp/out dir/review.json'"),
+        ("darwin", "/tmp/out/review.json", "/tmp/out/review.json"),
+        ("win32", r"C:\Users\me\out\review.json", r"C:\Users\me\out\review.json"),
+        ("win32", r"C:\Users\my name\review.json", r'"C:\Users\my name\review.json"'),
+    ],
+)
+def test_paths_in_commands_are_quoted_for_the_platforms_shell(platform, path, shown):
+    assert cli.shell_arg(path, platform) == shown
