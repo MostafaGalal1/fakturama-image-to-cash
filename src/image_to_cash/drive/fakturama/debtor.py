@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from image_to_cash.drive.actions import set_text
+from image_to_cash.drive.backend.base import BackendError
 from image_to_cash.drive.elements import Element, Role
 from image_to_cash.drive.fakturama.context import Context
 from image_to_cash.drive.fakturama.copied import parse_address_rows
@@ -53,7 +54,12 @@ def _pick_row(ctx: Context, controls: tuple[Element, ...], debtor: Debtor) -> bo
     grid = _selector_grid(controls)
     if not has_rows(ctx.ui, ctx.ocr, grid):
         return False
-    rows = parse_address_rows(copy_all(ctx.ui, grid))
+    try:
+        rows = parse_address_rows(copy_all(ctx.ui, grid))
+    except (BackendError, WaitTimeout):  # BackendError covers UnsafeToAct
+        if ctx.wb.dialog_open(SELECTOR):
+            raise
+        return True  # the selector accepted its single hit late, by itself; the addresses decide
     decision = decide_debtor(rows, debtor)
     if decision.creates:
         return False

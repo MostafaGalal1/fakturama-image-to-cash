@@ -227,6 +227,9 @@ class WindowsUiaBackend:
     def key(self, chord: str) -> None:
         parsed = parse_chord(chord)
         self._guard()
+        if self._clicked is not None and not self._alive(self._clicked):
+            # its dialog closed by itself: the keys would reach whatever holds the focus now
+            raise UnsafeToAct("the control that was clicked has gone; refusing to send keys")
         win32.press_chord(parsed)
         if parsed.key in FOCUS_MOVING_KEYS:
             self._clicked = None
