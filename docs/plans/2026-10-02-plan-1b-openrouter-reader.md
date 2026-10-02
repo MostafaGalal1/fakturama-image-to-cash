@@ -310,6 +310,12 @@ def test_the_cap_never_leaves_part_of_the_key(prepared_image):
     assert "sk-or" not in message
 
 
+def test_a_key_split_by_control_characters_is_still_redacted(prepared_image):
+    upstream = f"bad key {API_KEY[:5]}\x1b{API_KEY[5:]}"
+    message = str(reader_error(serve(status=400, json={"error": {"message": upstream}}), prepared_image))
+    assert "bad key [redacted]" in message
+
+
 def test_upstream_messages_are_one_printable_line(prepared_image):
     upstream = "bad\x1b[2J\x1b]0;title\x07\nerror: forged line"
     message = str(reader_error(serve(status=400, json={"error": {"message": upstream}}), prepared_image))
@@ -356,8 +362,22 @@ def test_a_message_that_is_not_an_object_counts_as_empty(prepared_image):
 
 
 def test_an_empty_reply_names_an_unusual_finish_reason(prepared_image):
-    reply = reply_with("", finish_reason="content_filter")
-    assert "(finish_reason: content_filter)" in str(reader_error(serve(json=reply), prepared_image))
+    reply = reply_with("", finish_reason="tool_calls")
+    assert "empty reply (finish_reason: tool_calls)" in str(reader_error(serve(json=reply), prepared_image))
+
+
+def test_an_unusual_finish_reason_is_cleaned_and_capped(prepared_image):
+    message = str(reader_error(serve(json=reply_with("", finish_reason="x" * 100 + API_KEY)), prepared_image))
+    assert "x" * 40 in message
+    assert "x" * 41 not in message
+    assert "sk-or" not in message
+
+
+@pytest.mark.parametrize("finish_reason", ["content_filter", "error"])
+def test_a_model_that_stopped_early_is_reported_even_with_partial_content(prepared_image, finish_reason):
+    reply = reply_with('{"external_ref', finish_reason=finish_reason)
+    message = str(reader_error(serve(json=reply), prepared_image))
+    assert f"stopped early (finish_reason: {finish_reason})" in message
 
 
 @pytest.mark.parametrize(
@@ -390,10 +410,17 @@ def test_connection_failures_say_so(prepared_image):
     assert "cannot reach OpenRouter: name resolution failed" in str(error)
 
 
-def test_a_timeout_warns_that_the_request_may_be_billed(prepared_image):
+def test_a_read_timeout_warns_that_the_request_may_be_billed(prepared_image):
     error = reader_error(failing(httpx.ReadTimeout("")), prepared_image)
     assert "no reply from OpenRouter within" in str(error)
     assert "may still be billed" in str(error)
+
+
+@pytest.mark.parametrize("timeout", [httpx.ConnectTimeout(""), httpx.WriteTimeout(""), httpx.PoolTimeout("")])
+def test_other_timeouts_say_the_request_never_got_through(prepared_image, timeout):
+    message = str(reader_error(failing(timeout), prepared_image))
+    assert f"cannot reach OpenRouter: {type(timeout).__name__}" in message
+    assert "billed" not in message
 
 
 def test_build_reader_uses_the_default_model_and_the_key_from_the_environment(monkeypatch):
@@ -565,8 +592,11 @@ SYSTEM_PROMPT = (
     "JSON Schema:\n" + json.dumps(Order.model_json_schema())
 )
 
-# Orders carry customers' personal data: only route to providers that neither store nor train on it.
+# Orders carry customers' personal data: only route to providers that declare they neither store nor
+# train on prompts.
 PROVIDER_PREFERENCES = {"data_collection": "deny"}
+# Finish reasons that mean the model stopped before finishing its answer.
+STOPPED_EARLY = ("content_filter", "error")
 
 STATUS_HINTS = {
     401: f"OpenRouter rejected the key in {API_KEY_ENV}",
@@ -604,8 +634,11 @@ class OpenRouterReader:
         try:
             with httpx.Client(transport=self._transport, timeout=TIMEOUT_SECONDS) as client:
                 response = client.post(API_URL, json=body, headers=headers)
-        except httpx.TimeoutException as error:
+        except httpx.ReadTimeout as error:
             message = f"no reply from OpenRouter within {TIMEOUT_SECONDS:.0f} s; the request may still be billed"
+            raise ReaderError(message) from error
+        except httpx.TimeoutException as error:  # connect, write or pool: the request was never processed
+            message = f"cannot reach OpenRouter: {type(error).__name__} after {TIMEOUT_SECONDS:.0f} s"
             raise ReaderError(message) from error
         except httpx.HTTPError as error:
             detail = self._clean(str(error)) or type(error).__name__
@@ -641,6 +674,8 @@ class OpenRouterReader:
         finish_reason = choice.get("finish_reason")
         if finish_reason == "length":
             raise ReaderError(f"{self._model}'s reply was cut off at {MAX_OUTPUT_TOKENS} tokens")
+        if finish_reason in STOPPED_EARLY:
+            raise ReaderError(f"{self._model} stopped early (finish_reason: {finish_reason})")
         message = choice.get("message")
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, str) or not content.strip():
@@ -707,7 +742,7 @@ def _request_body(model: str, data_url: str) -> dict[str, object]:
         "temperature": 0,
         "max_tokens": MAX_OUTPUT_TOKENS,
         "response_format": {"type": "json_object"},
-        "provider": PROVIDER_PREFERENCES,
+        "provider": dict(PROVIDER_PREFERENCES),
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -827,10 +862,10 @@ __all__ = ["READERS", "FixtureReader", "ImageReader", "OpenRouterReader", "Reade
 - [ ] **Step 6: Run the tests**
 
 Run: `uv run pytest tests/test_openrouter_reader.py tests/test_readers.py -q`
-Expected: `71 passed` (57 + 14)
+Expected: `78 passed` (64 + 14)
 
 Run: `uv run pytest -q`
-Expected: 227 passed (169 + 1 + 57)
+Expected: 234 passed (169 + 1 + 64)
 
 - [ ] **Step 7: Commit**
 
@@ -1228,7 +1263,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run the tests**
 
 Run: `uv run pytest -q`
-Expected: 211 passed
+Expected: 238 passed
 
 - [ ] **Step 5: Commit**
 

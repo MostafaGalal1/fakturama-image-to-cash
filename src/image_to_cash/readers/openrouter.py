@@ -40,8 +40,11 @@ SYSTEM_PROMPT = (
     "JSON Schema:\n" + json.dumps(Order.model_json_schema())
 )
 
-# Orders carry customers' personal data: only route to providers that neither store nor train on it.
+# Orders carry customers' personal data: only route to providers that declare they neither store nor
+# train on prompts.
 PROVIDER_PREFERENCES = {"data_collection": "deny"}
+# Finish reasons that mean the model stopped before finishing its answer.
+STOPPED_EARLY = ("content_filter", "error")
 
 STATUS_HINTS = {
     401: f"OpenRouter rejected the key in {API_KEY_ENV}",
@@ -79,8 +82,11 @@ class OpenRouterReader:
         try:
             with httpx.Client(transport=self._transport, timeout=TIMEOUT_SECONDS) as client:
                 response = client.post(API_URL, json=body, headers=headers)
-        except httpx.TimeoutException as error:
+        except httpx.ReadTimeout as error:
             message = f"no reply from OpenRouter within {TIMEOUT_SECONDS:.0f} s; the request may still be billed"
+            raise ReaderError(message) from error
+        except httpx.TimeoutException as error:  # connect, write or pool: the request was never processed
+            message = f"cannot reach OpenRouter: {type(error).__name__} after {TIMEOUT_SECONDS:.0f} s"
             raise ReaderError(message) from error
         except httpx.HTTPError as error:
             detail = self._clean(str(error)) or type(error).__name__
@@ -116,6 +122,8 @@ class OpenRouterReader:
         finish_reason = choice.get("finish_reason")
         if finish_reason == "length":
             raise ReaderError(f"{self._model}'s reply was cut off at {MAX_OUTPUT_TOKENS} tokens")
+        if finish_reason in STOPPED_EARLY:
+            raise ReaderError(f"{self._model} stopped early (finish_reason: {finish_reason})")
         message = choice.get("message")
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, str) or not content.strip():
@@ -182,7 +190,7 @@ def _request_body(model: str, data_url: str) -> dict[str, object]:
         "temperature": 0,
         "max_tokens": MAX_OUTPUT_TOKENS,
         "response_format": {"type": "json_object"},
-        "provider": PROVIDER_PREFERENCES,
+        "provider": dict(PROVIDER_PREFERENCES),
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
