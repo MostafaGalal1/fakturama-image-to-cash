@@ -42,6 +42,7 @@ attribution trailer**.
 | 6 | Run log (JSONL, one line per step) and annotated screenshots | `report.py` | `test_report.py` | `c694144` |
 | 7 | Backend contract, key chords, frontmost rule | `backend/base.py`, `backend/keys.py`, `backend/safety.py` | `test_backend_safety.py` | `b1b591e` |
 | 8 | macOS adapter; window-only capture; opt-in live contract test | `backend/macos_ax.py`, `backend/window_capture.py` | `test_window_capture.py`, `test_macos_ax_contract.py` (`FAKTURAMA_LIVE=1`) | `8f4c750` |
+| 9 | Field writes (click, select all, type, Tab, read back; one retry, then stop naming the field only); condition waits | `actions.py`, `waits.py` | `test_actions_and_waits.py`, `fake_backend.py` | `673fd64` |
 
 ## Decisions made while building
 
