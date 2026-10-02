@@ -19,14 +19,11 @@ from PIL import Image
 
 from image_to_cash.drive.backend.base import UiBackend
 from image_to_cash.drive.elements import Element, Rect, Role
+from image_to_cash.drive.layout import Layout
 from image_to_cash.drive.waits import wait_until
 from image_to_cash.errors import NeedsReview
 from image_to_cash.ocr.base import OcrEngine
 
-HEADER_HEIGHT = 15
-ROW_HEIGHT = 15
-FIRST_ROW_DY = HEADER_HEIGHT + ROW_HEIGHT // 2
-ROW_HEADER_DX = 12  # the row-number column of the order items grid
 SETTLE_SECONDS = 1.5  # a search filter or an added line redraws the grid
 EDITOR_SECONDS = 1.0
 ROW_INSET = 3  # keeps the row's own borders out of the strip
@@ -38,19 +35,20 @@ MIN_MARKED_SHARE = 0.0005
 
 def grid_at(ui: UiBackend, x: float, y: float, what: str) -> Element:
     grid = ui.element_at(x, y)
-    if grid is None or grid.native_role != "AXScrollArea":
+    if grid is None or grid.native_role not in ui.layout.grid_roles:
         raise NeedsReview("grid_not_found", {"grid": what})
     return grid
 
 
-def row_y(grid: Element, index: int) -> float:
-    return grid.rect.y + FIRST_ROW_DY + index * ROW_HEIGHT
+def row_y(layout: Layout, grid: Element, index: int) -> float:
+    return grid.rect.y + layout.first_row_dy + index * layout.row_height
 
 
 def has_rows(ui: UiBackend, ocr: OcrEngine, grid: Element) -> bool:
     """True when the first row shows anything: dark text, the blue of a selected row, or text that
     OCR reads. An empty row is white with light grey column lines."""
-    strip = Rect(grid.rect.x, grid.rect.y + HEADER_HEIGHT + ROW_INSET, grid.rect.width, ROW_HEIGHT - 2 * ROW_INSET)
+    layout = ui.layout
+    strip = Rect(grid.rect.x, grid.rect.y + layout.header_height + ROW_INSET, grid.rect.width, layout.row_height - 2 * ROW_INSET)
     with TemporaryDirectory() as scratch:
         shot = ui.capture(strip, Path(scratch) / "row.png")
         with Image.open(shot) as image:
@@ -70,14 +68,14 @@ def row_drawn(pixels: Image.Image) -> bool:
 
 def copy_all(ui: UiBackend, grid: Element, *, x_offset: float = 150) -> str:
     """Every row of a grid that has rows: click into it, select all, copy."""
-    ui.click(grid, at=(grid.rect.x + x_offset, row_y(grid, 0)))
+    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0)))
     ui.key("primary+a")
     return ui.copy_selection()
 
 
 def select_row(ui: UiBackend, grid: Element, index: int, rows: int, *, x_offset: float = 150) -> str:
     """Leave exactly row `index` selected and return its copy, for the caller to confirm."""
-    ui.click(grid, at=(grid.rect.x + x_offset, row_y(grid, 0)))
+    ui.click(grid, at=(grid.rect.x + x_offset, row_y(ui.layout, grid, 0)))
     for _ in range(rows):
         ui.key("up")
     for _ in range(index):
@@ -87,13 +85,13 @@ def select_row(ui: UiBackend, grid: Element, index: int, rows: int, *, x_offset:
 
 def copy_line(ui: UiBackend, grid: Element, index: int) -> str:
     """One whole row of the order items grid, selected by its row header."""
-    ui.click(grid, at=(grid.rect.x + ROW_HEADER_DX, row_y(grid, index)))
+    ui.click(grid, at=(grid.rect.x + ui.layout.row_header_dx, row_y(ui.layout, grid, index)))
     return ui.copy_selection()
 
 
 def column_centres(ui: UiBackend, ocr: OcrEngine, grid: Element, names: tuple[str, ...]) -> Mapping[str, float]:
     """Screen x of each named column, from OCR of the header row."""
-    header = Rect(grid.rect.x, grid.rect.y, grid.rect.width, HEADER_HEIGHT)
+    header = Rect(grid.rect.x, grid.rect.y, grid.rect.width, ui.layout.header_height)
     with TemporaryDirectory() as scratch:
         shot = ui.capture(header, Path(scratch) / "header.png")
         with Image.open(shot) as image:
@@ -115,7 +113,7 @@ def edit_cell(ui: UiBackend, grid: Element, *, x: float, index: int, text: str) 
         focused = ui.focused()
         return focused is not None and focused.role is Role.TEXT_FIELD and grid.rect.contains(focused.rect)
 
-    ui.click(grid, at=(x, row_y(grid, index)))
+    ui.click(grid, at=(x, row_y(ui.layout, grid, index)))
     if editor_open():  # the cell was already selected, so the click opened its editor
         ui.key("primary+a")
         ui.type_text(text)

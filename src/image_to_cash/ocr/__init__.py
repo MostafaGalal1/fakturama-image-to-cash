@@ -1,8 +1,11 @@
 """OCR engines behind one interface; `build_ocr` picks one by name."""
 
+import sys
+
 from image_to_cash.ocr.base import Box, OcrEngine, OcrError, TextBox
 
-ENGINES = ("macos-vision",)
+ENGINES = ("macos-vision", "windows-ocr")
+DEFAULT_ENGINE = "windows-ocr" if sys.platform == "win32" else "macos-vision"
 
 
 def build_ocr(name: str) -> OcrEngine:
@@ -12,7 +15,11 @@ def build_ocr(name: str) -> OcrEngine:
         except ImportError as error:
             raise OcrError("macos-vision OCR needs macOS with pyobjc-framework-Vision installed") from error
         return MacVisionOcr()
+    if name == "windows-ocr":
+        from image_to_cash.ocr.windows_ocr import WindowsOcr  # loads winrt only when it reads
+
+        return WindowsOcr()
     raise ValueError(f"unknown OCR engine: {name!r} (available: {', '.join(ENGINES)})")
 
 
-__all__ = ["ENGINES", "Box", "OcrEngine", "OcrError", "TextBox", "build_ocr"]
+__all__ = ["DEFAULT_ENGINE", "ENGINES", "Box", "OcrEngine", "OcrError", "TextBox", "build_ocr"]

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Protocol
 
 from image_to_cash.drive.elements import Element, Rect, Window
+from image_to_cash.drive.layout import Layout
 
 
 class BackendError(RuntimeError):
@@ -32,6 +33,8 @@ class FocusNotTaken(UnsafeToAct):
 
 
 class UiBackend(Protocol):
+    layout: Layout  # Fakturama's geometry on this OS
+
     def bring_to_front(self) -> None:
         """Activate Fakturama; afterwards losing the front stops the run instead of re-activating."""
         ...

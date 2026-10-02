@@ -1,0 +1,122 @@
+"""Backend contract against the running Fakturama on Windows (design §8). Opt-in: FAKTURAMA_LIVE=1.
+
+The Windows twin of test_macos_ax_contract.py. It brings Fakturama to the front, clicks and types,
+so nobody may use the PC (or the VM's window) while it runs. It saves nothing: each editor it opens
+is closed with every "Save Parts" box unticked.
+
+`test_print_calibration` prints what the flow assumes about Fakturama's layout (tab folders, the
+main toolbar's tooltips, the list rows): run it with `-s` and compare with WINDOWS_LAYOUT.
+"""
+
+import os
+import time
+
+import pytest
+
+from image_to_cash.drive.elements import Role
+from image_to_cash.drive.fakturama.workbench import Workbench
+from image_to_cash.drive.locate import LocatorError, by_title, right_of_label
+
+pytestmark = [
+    pytest.mark.windows,
+    pytest.mark.skipif(
+        os.environ.get("FAKTURAMA_LIVE") != "1",
+        reason="set FAKTURAMA_LIVE=1, with Fakturama running and nobody using the PC",
+    ),
+]
+
+WAIT_SECONDS = 5.0
+FLOW_TOOLTIPS = ("Create: New Order", "Save the current contents")  # main-toolbar buttons the flow presses
+
+
+@pytest.fixture
+def backend():
+    from image_to_cash.drive.backend.windows_uia import WindowsUiaBackend
+
+    backend = WindowsUiaBackend.attach()
+    backend.bring_to_front()
+    yield backend
+    close_all_without_saving(backend)
+
+
+@pytest.fixture
+def workbench(backend, tmp_path):
+    return Workbench(backend, tmp_path)
+
+
+def open_vat_editor(backend, workbench):
+    backend.press_menu(("New", "New VAT"))
+    deadline = time.monotonic() + WAIT_SECONDS
+    while True:
+        elements = backend.scan(workbench.editor_area())
+        try:
+            right_of_label(elements, "Value")
+            return elements
+        except LocatorError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.2)
+
+
+def close_all_without_saving(backend):
+    backend.press_menu(("File", "Close All"))
+    for _ in range(10):
+        time.sleep(1.0)
+        dialogs = [w for w in backend.windows() if w.title == "Save Parts"]
+        if not dialogs:
+            return
+        elements = backend.tree(dialogs[0])
+        boxes = [e for e in elements if e.role is Role.CHECKBOX]
+        for box in boxes:
+            if backend.refresh(box).value == "1":
+                backend.press(box)
+        assert all(backend.refresh(box).value == "0" for box in boxes), "a part is still ticked: not pressing OK"
+        backend.press(by_title(elements, Role.BUTTON, "OK"))
+    pytest.fail("Save Parts dialogs kept appearing")
+
+
+def test_main_window_is_listed(workbench):
+    assert workbench.main_window().rect.width > 0
+
+
+def test_editor_and_list_folders_are_found(workbench):
+    editors, views = workbench.editor_area(), workbench.view_area()
+    assert editors.height > 0 and views.height > 0
+    assert editors.bottom <= views.y
+
+
+@pytest.mark.parametrize("tooltip", FLOW_TOOLTIPS)
+def test_main_toolbar_buttons_carry_their_tooltips(workbench, tooltip):
+    assert workbench.toolbar_button(tooltip).enabled
+
+
+def test_text_is_typed_and_read_back(backend, workbench):
+    name = right_of_label(open_vat_editor(backend, workbench), "Name")
+    backend.click(name)
+    backend.type_text("contract test ü")
+    backend.key("tab")
+    assert backend.refresh(name).value == "contract test ü"
+
+
+def test_popup_option_is_chosen(backend, workbench):
+    code = right_of_label(open_vat_editor(backend, workbench), "VAT code (E-Invoice)", role=Role.POPUP)
+    backend.choose(code, "S (Standard rate)")
+    assert backend.refresh(code).value == "S (Standard rate)"
+
+
+def test_area_is_captured(backend, workbench, tmp_path):
+    shot = backend.capture(workbench.main_window().rect, tmp_path / "main.png")
+    assert shot.stat().st_size > 0
+
+
+def test_print_calibration(backend, workbench):
+    main = workbench.main_window()
+    elements = backend.tree(main)
+    print(f"\nlayout in use: {backend.layout}")
+    print(f"main window (points): {main.rect}")
+    for group in (e for e in elements if e.role is Role.TAB_GROUP):
+        print(f"tab folder: {group.rect}")
+    for button in (e for e in elements if e.role is Role.BUTTON and e.help):
+        print(f"button {button.rect} help={button.help!r} title={button.title!r}")
+    for other in (e for e in elements if e.role is Role.OTHER):
+        print(f"other {other.native_role} {other.rect}")

@@ -21,8 +21,6 @@ T = TypeVar("T")
 
 MAIN_TITLE_PREFIX = "Fakturama - "
 ERROR_DIALOG = "Internal Error"
-TAB_STRIP = 26  # a tab folder's tab row; its view toolbar sits at its right end
-NAV_ITEMS_AREA = Rect(20, 560, 280, 100)  # the left panel's "New" group
 OPEN_TIMEOUT = 30
 SAVE_TIMEOUT = 15
 DIALOG_TIMEOUT = 10
@@ -44,7 +42,10 @@ class Workbench:
         return found[0]
 
     def _folders(self) -> tuple[Rect, Rect]:
-        groups = [e.rect for e in self.ui.tree(self.main_window()) if e.role is Role.TAB_GROUP]
+        """The editor folder on top and the list views below. Tab folders inside an editor (a
+        Debtor's "Addresses") are left out: they lie within one of these two."""
+        found = [e.rect for e in self.ui.tree(self.main_window()) if e.role is Role.TAB_GROUP]
+        groups = [rect for rect in found if not any(other != rect and other.contains(rect) for other in found)]
         if len(groups) != 2:
             raise NeedsReview("fakturama_layout", {"tab_folders": str(len(groups))})
         top, bottom = sorted(groups, key=lambda rect: rect.y)
@@ -52,19 +53,19 @@ class Workbench:
 
     def editor_area(self) -> Rect:
         top, _ = self._folders()
-        return Rect(top.x, top.y + TAB_STRIP, top.width, top.height - TAB_STRIP)
+        return Rect(top.x, top.y + self.ui.layout.tab_strip, top.width, top.height - self.ui.layout.tab_strip)
 
     def view_area(self) -> Rect:
         _, bottom = self._folders()
-        return Rect(bottom.x, bottom.y + TAB_STRIP, bottom.width, bottom.height - TAB_STRIP)
+        return Rect(bottom.x, bottom.y + self.ui.layout.tab_strip, bottom.width, bottom.height - self.ui.layout.tab_strip)
 
     def view_toolbar(self) -> tuple[Element, ...]:
         _, bottom = self._folders()
-        return self.ui.scan(Rect(bottom.x, bottom.y, bottom.width, TAB_STRIP))
+        return self.ui.scan(Rect(bottom.x, bottom.y, bottom.width, self.ui.layout.tab_strip))
 
     def editor_tabs(self) -> tuple[Element, ...]:
         top, _ = self._folders()
-        return tuple(e for e in self.ui.scan(Rect(top.x, top.y, top.width, TAB_STRIP)) if e.role is Role.RADIO)
+        return tuple(e for e in self.ui.scan(Rect(top.x, top.y, top.width, self.ui.layout.tab_strip)) if e.role is Role.RADIO)
 
     # Toolbar, tabs and navigation.
 
@@ -109,7 +110,7 @@ class Workbench:
         more click is allowed when nothing opened."""
         for _ in range(2):
             item = wait_until(
-                lambda: label(self.ui.scan(NAV_ITEMS_AREA), text), what=f"'{text}'", timeout=10, poll=POLL, ignoring=(LocatorError,)
+                lambda: label(self.ui.scan(self._nav_area()), text), what=f"'{text}'", timeout=10, poll=POLL, ignoring=(LocatorError,)
             )
             self.ui.click(item)
             try:
@@ -118,6 +119,10 @@ class Workbench:
             except WaitTimeout:
                 self.check_errors()
         raise NeedsReview("navigation_failed", {"item": text})
+
+    def _nav_area(self) -> Rect:
+        window, nav = self.main_window().rect, self.ui.layout.nav_area
+        return Rect(window.x + nav.x, window.y + nav.y, nav.width, nav.height)
 
     # Editors.
 
