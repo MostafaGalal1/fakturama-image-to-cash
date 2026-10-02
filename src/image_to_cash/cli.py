@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -86,7 +87,7 @@ def _extract(args: argparse.Namespace) -> int:
             f"{len(result.issues)} issue(s); see {target}"
         )
         print(f"  check every field of draft_order against {result.source_image}, correct it, then run:")
-        print(f"  image-to-cash approve {shlex.quote(str(target))} --out {shlex.quote(str(args.out))}")
+        print(f"  image-to-cash approve {shell_arg(str(target))} --out {shell_arg(str(args.out))}")
         return EXIT_REVIEW
     print(f"order written to {target}")
     return EXIT_OK
@@ -163,6 +164,12 @@ def _driver() -> tuple[UiBackend, OcrEngine]:
     except ImportError as error:
         raise RuntimeError(f"the {sys.platform} adapter is not installed ({error}); run uv sync") from error
     raise RuntimeError(f"drive runs on macOS and Windows, not {sys.platform}")
+
+
+def shell_arg(text: str, platform: str = sys.platform) -> str:
+    """`text` as one argument of a command a person pastes: POSIX quoting on macOS, Windows'
+    (understood by cmd and PowerShell alike) on Windows."""
+    return subprocess.list2cmdline([text]) if platform == "win32" else shlex.quote(text)
 
 if __name__ == "__main__":
     sys.exit(main())
