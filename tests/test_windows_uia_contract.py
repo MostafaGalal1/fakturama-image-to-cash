@@ -2,7 +2,7 @@
 
 The Windows twin of test_macos_ax_contract.py. It brings Fakturama to the front, clicks and types,
 so nobody may use the PC (or the VM's window) while it runs. It saves nothing: each editor it opens
-is closed on its own, answering No to "Save changes?".
+is closed on its own, without saving (drive/fakturama/discard.py).
 
 `test_print_calibration` prints what the flow assumes about Fakturama's layout (tab folders, the
 main toolbar's tooltips, the list rows): run it with `-s` and compare with WINDOWS_LAYOUT.
@@ -14,6 +14,7 @@ import time
 import pytest
 
 from image_to_cash.drive.elements import Role
+from image_to_cash.drive.fakturama.discard import discard_editors
 from image_to_cash.drive.fakturama.workbench import Workbench
 from image_to_cash.drive.locate import LocatorError, by_title, right_of_label
 
@@ -59,21 +60,9 @@ def open_vat_editor(backend, workbench):
 
 
 def close_all_without_saving(backend):
-    """Closes one editor at a time and answers No to "Save changes?". Never "Close All": its
-    "Save Parts" list hides on Windows which parts are ticked, so its OK could save them."""
-    workbench = Workbench(backend, None)
-    for _ in range(10):
-        if not workbench.editor_tabs():
-            return
-        backend.press_menu(("File", "Close"))
-        time.sleep(1.0)
-        for dialog in (w for w in backend.windows() if not w.title.startswith("Fakturama - ")):
-            buttons = [e for e in backend.tree(dialog) if e.role is Role.BUTTON]
-            assert any(b.title == "No" for b in buttons), f"unexpected dialog {dialog.title!r}: not answering it"
-            backend.bring_to_front()
-            backend.press(by_title(buttons, Role.BUTTON, "No"))
-            time.sleep(1.0)
-    pytest.fail("editors kept open after ten closes")
+    """The bot's own discard: one editor at a time, "Save Parts" answered only once its box reads
+    back unticked. Never "Close All"."""
+    discard_editors(Workbench(backend, None))
 
 
 def test_main_window_is_listed(workbench):

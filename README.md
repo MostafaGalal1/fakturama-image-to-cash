@@ -326,8 +326,10 @@ Still open:
   delivery ZIP) both pass. The zoomed second look is tried for one unconfirmed field only; two or
   more go straight to review.
 - Windows OCR leaves out short, isolated table cells: the clean sample's "10%", "0%" and one
-  "19%" (and the "Disc" header) were missing, also word by word. On Windows the clean sample
-  therefore goes to review (3 of 41 fields unconfirmed); macOS Vision confirms all 41.
+  "19%" (and the "Disc" header) were missing, also word by word. Zooming the row, cropping and
+  padding single cells, and painting out the grid lines did not bring "10%" or "0%" back, so it
+  is not a resolution problem. On Windows the clean sample therefore goes to review (3 of 41
+  fields unconfirmed, which a person approves with `approve`); macOS Vision confirms all 41.
 - Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
   stopped them, but they are not usable as readers.
 - Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % scaling. Other
@@ -376,15 +378,10 @@ Mac stayed in use while the bot worked inside the VM.
 ## What I would do differently
 
 The brief asks for Fakturama's UI, so writing to its database or using its web-shop import were
-out. Within that rule, two choices cost the most time:
+out. Within that rule, one choice cost the most time:
 
 - **macOS first.** The brief's reference platform is Windows. Building macOS first, then Windows,
   meant two backends and two sets of quirks; most Windows fixes above would have been met once.
-- **Driving from outside the process.** Fakturama is an Eclipse/SWT application. A driver inside
-  its JVM (SWTBot, or a Java agent) reads widgets and table cells directly: no foreground, mouse,
-  clipboard or OCR of grids, the same on both OSes, and much faster. It costs a change to
-  Fakturama's launch settings (or a JDK to attach from) and ties the bot to Fakturama's widget
-  classes. A read-only spike since then confirms it: [docs/spike-swt-agent.md](docs/spike-swt-agent.md).
 
 What I would keep either way: every field and row selection read back, totals compared, and a
 stop instead of a guess.
@@ -392,17 +389,14 @@ stop instead of a guess.
 ## If I had 3 more hours
 
 In priority order, each item is about trust in an unattended run. Done since the first list:
-discarding a stop's editors so a batch goes on, measured rows in the selectors and lists, and
-the in-process spike.
+discarding a stop's editors so a batch goes on, and measured rows in the selectors and lists.
 
-1. **Move the read-backs into Fakturama's JVM**, following the
-   [in-process spike](docs/spike-swt-agent.md). It read every field and grid cell of an open
-   Invoice in 45 ms, with no clipboard, OCR or foreground. Keep today's mouse and keyboard input
-   at first; the copy and OCR code it replaces is where most live bugs were.
-2. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
+1. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
    Windows 11 ARM VM at 200 % scaling. Next: an x64 PC at 100 % and 150 %, measure
    `row_header_dx`, and scroll editors so the flow does not depend on the editor's height.
-3. **Windows OCR on table cells:** read each item row again from a zoomed crop when short cells
-   are missing, so the clean sample confirms on Windows too and a batch there reaches Fakturama.
-4. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
+2. **A second OCR engine for table cells on Windows** (Tesseract, for example): Windows OCR
+   misses short cells even zoomed and alone. A line's discount could also count as confirmed by
+   exact arithmetic from its confirmed quantity, unit price and line total, which fix it uniquely
+   (a line's VAT rate cannot: equal line totals with swapped rates give the same VAT sum).
+3. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
    values, annotated screenshots) for whoever reviews a stopped run.
