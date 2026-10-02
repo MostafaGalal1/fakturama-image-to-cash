@@ -14,11 +14,10 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
   Order-first flow through the macOS Accessibility API: Order, Debtor (select or create, with its
   payment method), Products (select or create, with their VAT), save, the linked Invoice, the paid
   status, and verification in Data > Documents. Findings: [docs/spike-macos-ax.md](docs/spike-macos-ax.md).
-- **Windows: built and partly run live** in a Windows 11 ARM VM (Parallels) on this Mac. Live
-  so far: the contract test (7 of 8 pass; the other is a test bug, since fixed), the Order header
-  (number, date, Cust.Ref., Net, With VAT) and the payment method (created, then reused on the
-  next run). It stops in the Debtor editor: at 200 % scaling its "address type" row lies below
-  the visible editor. Products, Invoice and paid have not run on Windows yet. See
+- **Windows: green end to end** in a Windows 11 ARM VM (Parallels) on this Mac, on the same
+  `order.json`: Order PO000002 and Invoice INV000002 saved, the Invoice paid, both verified in
+  Data > Documents, in about 1.5 minutes. Earlier runs on the same database covered the create
+  paths: payment method, Debtor with a separate delivery address, and both Products. See
   [Stage 2 on Windows](#stage-2-on-windows).
 
 ## Setup (macOS)
@@ -264,14 +263,29 @@ Fixed in the code:
   which otherwise covered Fakturama.
 - **"Save Parts":** it lists the parts as rows whose ticks Windows does not report, so nothing
   presses its OK. The contract test closes editors one by one instead.
+- **Tabs:** UI Automation hit-tests a tab folder, not the windowless tab in it, so the click
+  guard accepts the folder that draws the tab.
+- **Focus:** right after a dialog closes itself, UI Automation names pid 0 (the desktop) as the
+  focus owner. That counts as no answer; the front-window check still decides.
+- **Self-closing selector:** the Debtor selector can accept its single hit by itself while the
+  bot copies its grid. Keys now refuse once the clicked control has gone (they had reached the
+  Order's price-mode box), and a selector that closed by itself counts as picked; the addresses
+  then decide.
+- **Double clicks:** two single clicks on the same grid row within Windows' double-click time
+  made a double click, which accepted the row. A single click now waits that time out.
+- **Role window:** the "address type" ▶ reopens its window on Windows, so Escape closes it.
+- **Save:** Eclipse saves the active part, and the Documents search left that list active, so
+  Save on the Invoice did nothing. Save now clicks the open editor's tab first.
+- **Stops:** an unexpected stop records where it failed (`where` in `run.jsonl`).
 
 Still open:
 
 - **Editor height:** at 200 % scaling the editor shows about 385 points, so a Debtor's "address
   type" row is out of view. Use 100–150 % scaling, or drag Fakturama's divider between the
-  editor and the lists lower. The flow does not scroll editors yet.
-- **Unverified:** the row-header offset (`row_header_dx`) is unmeasured, and products, invoice
-  and paid have not run.
+  editor and the lists lower (done once in the VM; Fakturama keeps it). The flow does not scroll
+  editors yet.
+- **Row header:** `row_header_dx` (12 points) is a guess. It works: every order line was copied
+  back and checked.
 
 ## Known limitations
 
@@ -281,8 +295,9 @@ Still open:
   straight to review.
 - Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
   stopped them, but they are not usable as readers.
-- Stage 2 has run end to end on macOS only. The Windows backend has not driven Fakturama yet (see
-  [what is unverified](#unverified-until-it-runs-on-windows)).
+- Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % scaling. Other
+  Windows scalings and x64 PCs have not been tried (see
+  [what the live Windows runs taught](#what-the-live-windows-runs-taught)).
 - A stop is not resumable. Master data saved before the stop (VAT, payment method, Debtor,
   Products) is found and reused on the next run, but an Order saved before a stop would be entered
   again, so restore the database backup after a stop past the Order's save.
@@ -304,8 +319,8 @@ In priority order, each item is about trust in an unattended run:
    and stops on the near miss. The VAT reuse branch should also open the existing rate and check
    its code is S (brief §3.5); today only the creation branch checks it.
 3. **Measure grid geometry instead of assuming it**: the row pitch by OCR once per grid.
-4. **Run the Windows backend live**, since the brief's reference platform is Windows. It is built
-   and unit-tested but has not driven Fakturama yet. I would calibrate `WINDOWS_LAYOUT` with the
-   contract test, then do one full run.
+4. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
+   Windows 11 ARM VM at 200 % scaling. Next: an x64 PC at 100 % and 150 %, measure
+   `row_header_dx`, and scroll editors so the flow does not depend on the editor's height.
 5. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
    values, annotated screenshots) for whoever reviews a stopped run.
