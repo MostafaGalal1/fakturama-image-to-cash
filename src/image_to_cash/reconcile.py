@@ -17,7 +17,7 @@ import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 
-from image_to_cash.model import Order
+from image_to_cash.model import Address, Order
 from image_to_cash.ocr.base import TextBox
 
 # Folded on both sides: OCR confuses these, and "," -> "." also unifies decimal commas.
@@ -54,15 +54,22 @@ def value_pattern(expected: str) -> re.Pattern[str]:
 
 
 def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
+    customer = order.customer
+    customer_id = (("customer.customer_id", customer.customer_id),) if customer.customer_id else ()
     header = (
         ("external_reference", order.external_reference),
         ("order_date", order.order_date.isoformat()),
+        ("currency", order.currency),
         ("payment.status", order.payment.status.value),
-        ("customer.phone", order.customer.phone),
-        ("billing_address.street", order.billing_address.street),
-        ("billing_address.zip", order.billing_address.zip),
-        ("delivery_address.street", order.delivery_address.street),
-        ("delivery_address.zip", order.delivery_address.zip),
+        ("payment.method", order.payment.method.value),
+        *customer_id,
+        ("customer.company", customer.company),
+        ("customer.alias", customer.alias),
+        ("customer.contact_name", customer.contact_name),
+        ("customer.email", customer.email),
+        ("customer.phone", customer.phone),
+        *_address("billing_address", order.billing_address),
+        *_address("delivery_address", order.delivery_address),
         ("totals.net", _amount(order.totals.net)),
         ("totals.vat", _amount(order.totals.vat)),
         ("totals.gross", _amount(order.totals.gross)),
@@ -74,6 +81,9 @@ def critical_fields(order: Order) -> tuple[tuple[str, str], ...]:
         for index, item in enumerate(order.items)
         for pair in (
             (f"items[{index}].sku", item.sku),
+            (f"items[{index}].description", item.description),
+            (f"items[{index}].quantity", _number(item.quantity)),
+            (f"items[{index}].unit", item.unit),
             (f"items[{index}].unit_net_price", _amount(item.unit_net_price)),
             (f"items[{index}].discount_percent", _percent(item.discount_percent)),
             (f"items[{index}].vat_percent", _percent(item.vat_percent)),
@@ -112,6 +122,16 @@ def _claim_rank(patterns: tuple[re.Pattern[str], ...], index: int) -> int:
 
 def _occurrences(pattern: re.Pattern[str], lines: tuple[str, ...]) -> int:
     return sum(len(pattern.findall(line)) for line in lines)
+
+
+def _address(prefix: str, address: Address) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (f"{prefix}.{part}", getattr(address, part)) for part in ("name", "street", "zip", "city", "country")
+    )
+
+
+def _number(value: Decimal) -> str:
+    return f"{value.normalize():f}"
 
 
 def _amount(value: Decimal) -> str:
