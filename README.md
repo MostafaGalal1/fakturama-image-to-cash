@@ -19,8 +19,16 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
 - **Checked live in the Windows VM:** a re-run of an entered order stops as already entered; a
   near-duplicate Debtor ("Northstar Office GmbH & Co") and Product (`CHR-ERG-010`) are created
   beside the originals and the exact rows are picked; a reused VAT rate is opened and its code S
-  confirmed; a near-miss contact ("Kline" for "Klein") stops for review. Not yet live: resuming
-  at the Invoice after a stop that follows the Order's save (unit-tested only).
+  confirmed; a near-miss contact ("Kline" for "Klein") stops for review.
+  - **Resume at the Invoice:** order E05 named a payment method Fakturama lacked ("Credit Card")
+    for an existing Debtor. The old flow saved Order PO000005, then stopped at the Invoice. After
+    the fix, the re-run found PO000005, reopened it, created "Credit Card" and saved Invoice
+    INV000004 paid.
+  - **Discard:** a stopped New Order, and a stopped Invoice beside its saved Order, were closed
+    with nothing saved: "Save Parts" was unticked and read back before OK.
+  - **Batch:** three images were read, routed to `review/` and logged. Windows OCR drops the item
+    table's short percent cells (see Known limitations), so on Windows even the clean sample goes
+    to review and the batch did not reach Fakturama.
 - **Windows: green end to end** in a Windows 11 ARM VM (Parallels) on this Mac, on the same
   `order.json`: Order PO000002 and Invoice INV000002 saved, the Invoice paid, both verified in
   Data > Documents, in about 1.5 minutes. Earlier runs on the same database covered the create
@@ -132,7 +140,8 @@ uv run image-to-cash drive out/clean/order.json --out out/drive
 
 The run writes `out/drive/run.jsonl` (one line per step: what was found, created, checked) and
 `out/drive/screens/` (numbered screenshots of Fakturama's own window at each milestone). After a
-stop, unsaved editors are left open for a person to finish or discard.
+stop, unsaved editors are left open for a person to look at; `image-to-cash discard` then closes
+them without saving (see [Unattended](#unattended-a-folder-of-orders)).
 
 ### A complete run
 
@@ -273,8 +282,14 @@ Fixed in the code:
   clipboard locked.
 - **Start of a run:** the bot keeps the display on, wakes it, and minimizes its own terminal,
   which otherwise covered Fakturama.
-- **"Save Parts":** it lists the parts as rows whose ticks Windows does not report, so nothing
-  presses its OK. The contract test closes editors one by one instead.
+- **"Save Parts":** its parts are rows of a native list view whose ticks UI Automation does not
+  report. The adapter reads each tick from the list itself (`LVM_GETITEMSTATE`) and clicks the box
+  drawn left of the row's text; OK is pressed only after the one part reads back unticked.
+- **Error log:** after an internal error Fakturama opens its Error view below the left panel, a
+  third tab folder. The editor and list folders are the two that share the widest column.
+- **Row pitch:** the order grid's frame reaches into the totals beside it, so "Total Net" read as
+  a third row and the median gap put row 2 eighteen points low (an empty copy, then Fakturama's
+  internal error). Rows never lie closer than one pitch, so the pitch is the smallest plausible gap.
 - **Tabs:** UI Automation hit-tests a tab folder, not the windowless tab in it, so the click
   guard accepts the folder that draws the tab.
 - **Focus:** right after a dialog closes itself, UI Automation names pid 0 (the desktop) as the
@@ -304,6 +319,9 @@ Still open:
 - The OCR cross-check ignores where a value sits: two fields that swapped values (billing and
   delivery ZIP) both pass. The zoomed second look is tried for one unconfirmed field only; two or
   more go straight to review.
+- Windows OCR leaves out short, isolated table cells: the clean sample's "10%", "0%" and one
+  "19%" (and the "Disc" header) were missing, also word by word. On Windows the clean sample
+  therefore goes to review (3 of 41 fields unconfirmed); macOS Vision confirms all 41.
 - Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
   stopped them, but they are not usable as readers.
 - Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % scaling. Other
@@ -312,13 +330,13 @@ Still open:
 - A re-run never enters an order twice. Before creating anything it searches Data > Documents
   for the reference: a saved Order without its Invoice resumes at the Invoice, Order plus Invoice
   is reported as already entered, and anything else goes to a person. Master data saved before a
-  stop is found and reused. What is not automatic: unsaved editors left by a stop must be finished
-  or discarded by a person (on Windows, Fakturama's "Save Parts" list hides its ticks, so the bot
-  never answers it).
-- Grid rows are measured by OCR where the order's line grid shows text; elsewhere (selectors,
-  lists) the layout's row height is assumed. Every row selection is copied back and compared, so
-  a wrong value stops the run instead of picking the wrong row.
-- Batch runs stop at the first drive stop, for the same reason: unsaved editors first.
+  stop is found and reused. Unsaved editors left by a stop are closed without saving by `discard`
+  (and by `batch` after a stop for review); a dialog the bot did not open, such as Fakturama's
+  "Duplicate Contact", is left to a person and ends the batch.
+- Grid rows are measured by OCR in the order's lines, the selectors and the lists; a grid with
+  too little text falls back to the layout's row height. Every row selection is copied back and
+  compared, so a wrong value stops the run instead of picking the wrong row.
+- `discard` is unit-tested for both systems but was checked live on Windows only.
 
 ## Unattended: a folder of orders
 
@@ -329,9 +347,22 @@ uv run --env-file .env image-to-cash batch inbox/ --out out/batch
 ```
 
 Each image moves to `inbox/done/` (Order and Invoice saved and verified), `inbox/review/`
-(extraction needs a person; Fakturama untouched) or `inbox/stopped/` (the drive stopped; the
-batch stops with it). Results land in `out/batch/<image name>/`, one line per image in
-`out/batch/batch.jsonl`. `--watch 30` keeps polling the folder.
+(extraction needs a person; Fakturama untouched) or `inbox/stopped/` (the drive stopped).
+Results land in `out/batch/<image name>/`, one line per image in `out/batch/batch.jsonl`.
+`--watch 30` keeps polling the folder.
+
+After a stop for review the batch closes the stopped order's editors without saving and goes on
+with the next image:
+
+- each editor is closed on its own, never with "Close All";
+- Fakturama's "Save Parts" gets OK only once its one box reads back unticked, and a question
+  naming the editor gets No;
+- the bot's own selectors are cancelled.
+
+The stopped order keeps its screenshots and `run.jsonl` for the person who reviews it, and a
+re-run resumes where it stopped. Any other failure, or a discard that meets a dialog it did not
+open, ends the batch. `--keep-open` ends it at the first stop instead. The exit code is 3 when
+any image went to `review/` or `stopped/`.
 
 The bot drives the real mouse and keyboard, so it needs a machine of its own: a small PC or a
 virtual machine beside the pharmacist's own work. The Windows VM used here is that setup: the
@@ -347,23 +378,27 @@ out. Within that rule, two choices cost the most time:
 - **Driving from outside the process.** Fakturama is an Eclipse/SWT application. A driver inside
   its JVM (SWTBot, or a Java agent) reads widgets and table cells directly: no foreground, mouse,
   clipboard or OCR of grids, the same on both OSes, and much faster. It costs a change to
-  Fakturama's launch settings and ties the bot to Fakturama's widget classes. I would spike it
-  before writing more UI Automation code.
+  Fakturama's launch settings (or a JDK to attach from) and ties the bot to Fakturama's widget
+  classes. A read-only spike since then confirms it: [docs/spike-swt-agent.md](docs/spike-swt-agent.md).
 
 What I would keep either way: every field and row selection read back, totals compared, and a
 stop instead of a guess.
 
 ## If I had 3 more hours
 
-In priority order, each item is about trust in an unattended run:
+In priority order, each item is about trust in an unattended run. Done since the first list:
+discarding a stop's editors so a batch goes on, measured rows in the selectors and lists, and
+the in-process spike.
 
-1. **Discard unsaved editors safely**, so a batch can go on after a stop: on Windows that means
-   reading "Save Parts" ticks from a screenshot of its checkboxes before pressing anything.
-2. **Spike an in-process SWT driver** (see above) on one step, such as the Debtor selector, and
-   compare speed and robustness with UI Automation.
-3. **Measure the selectors' and lists' rows too**, not only the order lines.
-4. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
+1. **Move the read-backs into Fakturama's JVM**, following the
+   [in-process spike](docs/spike-swt-agent.md). It read every field and grid cell of an open
+   Invoice in 45 ms, with no clipboard, OCR or foreground. Keep today's mouse and keyboard input
+   at first; the copy and OCR code it replaces is where most live bugs were.
+2. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
    Windows 11 ARM VM at 200 % scaling. Next: an x64 PC at 100 % and 150 %, measure
    `row_header_dx`, and scroll editors so the flow does not depend on the editor's height.
+3. **Windows OCR on table cells:** read each item row again from a zoomed crop when short cells
+   are missing, so the clean sample confirms on Windows too and a batch there reaches Fakturama.
+4. **`discard` and `batch` live on macOS** (discard is unit-tested; checked live on Windows only).
 5. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
    values, annotated screenshots) for whoever reviews a stopped run.
