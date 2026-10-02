@@ -2511,6 +2511,36 @@ def test_missing_image_is_a_clear_error(tmp_path, sample_order_path, capsys):
     code = run_extract(tmp_path / "missing.png", sample_order_path, tmp_path)
     assert code == cli.EXIT_ERROR
     assert "image not found" in capsys.readouterr().err
+
+
+def test_failed_extract_removes_an_earlier_order(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything
+):
+    use_ocr(ocr_seeing_everything)
+    run_extract(order_image, sample_order_path, tmp_path)
+    assert run_extract(order_image, tmp_path / "missing.json", tmp_path) == cli.EXIT_ERROR
+    assert not (tmp_path / "order.json").exists()
+
+
+def test_refused_approve_removes_an_earlier_order(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything, sample_order
+):
+    use_ocr(ocr_seeing_everything)
+    run_extract(order_image, sample_order_path, tmp_path / "out")
+    totals = sample_order.totals.model_copy(update={"gross": Decimal("1.00")})
+    draft = tmp_path / "draft.json"
+    draft.write_text(sample_order.model_copy(update={"totals": totals}).model_dump_json())
+    assert cli.main(["approve", str(draft), "--out", str(tmp_path / "out")]) == cli.EXIT_REVIEW
+    assert not (tmp_path / "out" / "order.json").exists()
+
+
+def test_invalid_draft_is_refused_briefly_without_echoing_values(tmp_path, sample_order, capsys):
+    draft = tmp_path / "draft.json"
+    draft.write_text(json.dumps(sample_order.model_dump(mode="json") | {"order_date": "SECRET-VALUE"}))
+    assert cli.main(["approve", str(draft), "--out", str(tmp_path / "ok")]) == cli.EXIT_REVIEW
+    error = capsys.readouterr().err
+    assert "order_date" in error
+    assert "SECRET-VALUE" not in error
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -2531,6 +2561,7 @@ import sys
 from pathlib import Path
 
 from PIL import UnidentifiedImageError
+from pydantic import ValidationError
 
 from image_to_cash.errors import NeedsReview
 from image_to_cash.extract import extract
@@ -2538,8 +2569,9 @@ from image_to_cash.invariants import check_invariants
 from image_to_cash.model import Order
 from image_to_cash.normalized import normalize
 from image_to_cash.ocr import ENGINES, OcrError, build_ocr
-from image_to_cash.outputs import ORDER_FILE, write_result
+from image_to_cash.outputs import clear_results, discard_order, write_order, write_result
 from image_to_cash.readers import READERS, ReaderError, build_reader
+from image_to_cash.readers.base import describe_validation_error
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -2577,6 +2609,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _extract(args: argparse.Namespace) -> int:
+    clear_results(args.out)  # a failed run must not leave an earlier order for Stage 2
     if not args.image.is_file():
         raise FileNotFoundError(f"image not found: {args.image}")
     reader = build_reader(args.reader, fixture=args.fixture)
@@ -2593,8 +2626,14 @@ def _extract(args: argparse.Namespace) -> int:
 
 
 def _approve(args: argparse.Namespace) -> int:
-    payload = json.loads(args.draft.read_text(encoding="utf-8"))
-    order = Order.model_validate(payload.get("draft_order", payload))
+    draft = args.draft.read_text(encoding="utf-8")  # read first: the draft may sit in --out
+    discard_order(args.out)  # a refused draft must not leave an earlier order for Stage 2
+    payload = json.loads(draft)
+    try:
+        order = Order.model_validate(payload.get("draft_order", payload))
+    except ValidationError as error:
+        print(f"not approved: draft is not a valid order: {describe_validation_error(error)}", file=sys.stderr)
+        return EXIT_REVIEW
     issues = check_invariants(order)
     if issues:
         for issue in issues:
@@ -2605,9 +2644,7 @@ def _approve(args: argparse.Namespace) -> int:
     except NeedsReview as review:
         print(f"not approved: {review}", file=sys.stderr)
         return EXIT_REVIEW
-    args.out.mkdir(parents=True, exist_ok=True)
-    target = args.out / ORDER_FILE
-    target.write_text(normalized.model_dump_json(indent=2), encoding="utf-8")
+    target = write_order(normalized, args.out)
     print(f"order written to {target}")
     return EXIT_OK
 
