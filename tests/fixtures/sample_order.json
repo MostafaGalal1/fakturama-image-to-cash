@@ -8,7 +8,7 @@
     "alias": "NORTHSTAR-BERLIN",
     "contact_name": "Marta Klein",
     "email": "marta.klein@example.test",
-    "phone": "+49 30 3550 1420"
+    "phone": "+49 30 5550 1420"
   },
   "billing_address": {
     "name": "Northstar Office GmbH",
@@ -19,7 +19,7 @@
   },
   "delivery_address": {
     "name": "Northstar Office Warehouse",
-    "street": "Huttenstrasse 41",
+    "street": "Beusselstrasse 44",
     "zip": "10553",
     "city": "Berlin",
     "country": "Germany"
@@ -31,10 +31,10 @@
   },
   "items": [
     {
-      "sku": "CHR-ERGO-01",
+      "sku": "CHR-ERG-01",
       "description": "Ergonomic Desk Chair",
       "quantity": "2",
-      "unit": "PCS",
+      "unit": "pcs",
       "unit_net_price": "250.00",
       "discount_percent": "10",
       "vat_percent": "19",
@@ -44,7 +44,7 @@
       "sku": "MAT-DESK-02",
       "description": "Anti-Fatigue Desk Mat",
       "quantity": "3",
-      "unit": "PCS",
+      "unit": "pcs",
       "unit_net_price": "40.00",
       "discount_percent": "0",
       "vat_percent": "19",

@@ -63,14 +63,14 @@ def test_normalize_sample(sample_order):
     assert normalized.payment.method is PaymentMethod.BANK_TRANSFER
     assert normalized.totals == sample_order.totals
     assert [(p.sku, p.gross_price, p.vat_percent) for p in normalized.products] == [
-        ("CHR-ERGO-01", Decimal("297.50"), Decimal("19")),
+        ("CHR-ERG-01", Decimal("297.50"), Decimal("19")),
         ("MAT-DESK-02", Decimal("47.60"), Decimal("19")),
     ]
     assert [
         (line.sku, line.quantity, line.discount_percent, line.line_net_total)
         for line in normalized.lines
     ] == [
-        ("CHR-ERGO-01", Decimal("2"), Decimal("10"), Decimal("450.00")),
+        ("CHR-ERG-01", Decimal("2"), Decimal("10"), Decimal("450.00")),
         ("MAT-DESK-02", Decimal("3"), Decimal("0"), Decimal("120.00")),
     ]
 
@@ -126,7 +126,7 @@ def test_conflicting_sku_lines_need_review(sample_order, change):
     with pytest.raises(NeedsReview) as excinfo:
         normalize(sample_order.model_copy(update={"items": items}))
     assert excinfo.value.reason == "conflicting_sku_lines"
-    assert excinfo.value.details == {"sku": "CHR-ERGO-01"}
+    assert excinfo.value.details == {"sku": "CHR-ERG-01"}
 
 
 @pytest.mark.parametrize(

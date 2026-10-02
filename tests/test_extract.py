@@ -107,7 +107,7 @@ def test_write_result_writes_review_json(tmp_path, sample_order_path, order_imag
     assert target.name == "review.json"
     assert payload["reason"] == "1 field(s) not confirmed by OCR, 0 issue(s)"
     assert payload["source_image"] == str(order_image)
-    assert payload["mismatches"] == [{"field": "items[0].sku", "expected": "CHR-ERGO-01"}]
+    assert payload["mismatches"] == [{"field": "items[0].sku", "expected": "CHR-ERG-01"}]
     assert payload["draft_order"]["external_reference"] == "WEB-2026-0714-A17"
 
 

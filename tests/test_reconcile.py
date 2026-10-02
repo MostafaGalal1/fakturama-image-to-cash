@@ -52,8 +52,8 @@ def test_critical_fields_use_printed_formats(sample_order):
     assert fields["items[0].unit_net_price"] == "250.00"
     assert fields["totals.gross"] == "678.30"
     assert fields["payment.payment_date"] == "2026-07-18"
-    assert fields["delivery_address.street"] == "Huttenstrasse 41"
-    assert fields["customer.phone"] == "+49 30 3550 1420"
+    assert fields["delivery_address.street"] == "Beusselstrasse 44"
+    assert fields["customer.phone"] == "+49 30 5550 1420"
 
 
 def test_unpaid_order_has_no_payment_date_field(sample_order):
@@ -92,14 +92,14 @@ def test_spacing_and_decimal_commas_are_tolerated(sample_order):
 
 
 def test_accents_and_dashes_are_tolerated(sample_order):
-    texts = replaced(expected_texts(sample_order), "Huttenstrasse 41", "Hüttenstraße 41")
+    texts = replaced(expected_texts(sample_order), "Beusselstrasse 44", "Beüsselstraße 44")
     texts = replaced(texts, "WEB-2026-0714-A17", "WEB–2026–0714–A17")
     assert flagged(sample_order, texts) == ()
 
 
 def test_values_inside_a_merged_table_row_are_found(sample_order):
-    row = "1 CHR-ERGO-01 Ergonomic Desk Chair 2 PCS 250.00 10% 19% 450.00"
-    merged = {"CHR-ERGO-01", "250.00", "10%", "450.00"}
+    row = "1 CHR-ERG-01 Ergonomic Desk Chair 2 pcs 250.00 10% 19% 450.00"
+    merged = {"CHR-ERG-01", "250.00", "10%", "450.00"}
     rest = tuple(t for t in expected_texts(sample_order) if t not in merged)
     assert flagged(sample_order, (*rest, row)) == ()
 
@@ -150,7 +150,7 @@ def test_amount_is_not_the_tail_of_a_longer_number(sample_order):
 
 
 def test_truncated_values_are_reported(sample_order):
-    order = with_item(sample_order, 0, sku="CHR-ERGO-0", unit_net_price=Decimal("50.00"))
+    order = with_item(sample_order, 0, sku="CHR-ERG-0", unit_net_price=Decimal("50.00"))
     assert flagged(order, expected_texts(sample_order)) == ("items[0].sku", "items[0].unit_net_price")
 
 
@@ -160,12 +160,12 @@ def test_house_number_must_match_in_full(sample_order):
 
 
 def test_zip_is_not_found_inside_the_phone_number(sample_order):
-    order = with_billing(sample_order, zip="30355")
+    order = with_billing(sample_order, zip="30555")
     assert flagged(order, expected_texts(sample_order)) == ("billing_address.zip",)
 
 
 def test_values_are_not_glued_across_boxes(sample_order):
-    order = with_item(sample_order, 0, sku="CHR-ERGO-012")
-    texts = inserted_after(without_one(expected_texts(sample_order), "250.00"), "CHR-ERGO-01", "2")
+    order = with_item(sample_order, 0, sku="CHR-ERG-012")
+    texts = inserted_after(without_one(expected_texts(sample_order), "250.00"), "CHR-ERG-01", "2")
     texts = (*texts, "Qty 2", "50.00 EUR")
     assert flagged(order, texts) == ("items[0].sku", "items[0].unit_net_price")

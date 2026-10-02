@@ -43,8 +43,8 @@ def test_json_round_trip_is_lossless(sample_order):
 
 
 def test_padded_text_is_stripped(sample_order):
-    data = with_value(sample_order.model_dump(mode="json"), ("items", 0, "sku"), "  CHR-ERGO-01 ")
-    assert Order.model_validate(data).items[0].sku == "CHR-ERGO-01"
+    data = with_value(sample_order.model_dump(mode="json"), ("items", 0, "sku"), "  CHR-ERG-01 ")
+    assert Order.model_validate(data).items[0].sku == "CHR-ERG-01"
 
 
 @pytest.mark.parametrize(

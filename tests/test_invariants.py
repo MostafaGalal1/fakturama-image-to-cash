@@ -98,7 +98,7 @@ def test_one_cent_line_difference_names_line_and_sku(sample_order):
     order = sample_order.model_copy(update={"items": (off_by_cent, *rest)})
     line_issues = [i for i in check_invariants(order) if i.code == "line_net_mismatch"]
     assert len(line_issues) == 1
-    assert line_issues[0].message.startswith("line 1 (CHR-ERGO-01):")
+    assert line_issues[0].message.startswith("line 1 (CHR-ERG-01):")
 
 
 def test_total_messages_name_what_they_compare(sample_order):
