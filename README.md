@@ -32,9 +32,11 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
     INV000004 paid.
   - **Discard:** a stopped New Order, and a stopped Invoice beside its saved Order, were closed
     with nothing saved: "Save Parts" was unticked and read back before OK.
-  - **Batch:** three images were read, routed to `review/` and logged. Windows OCR drops the item
-    table's short percent cells (see Known limitations), so on Windows even the clean sample goes
-    to review and the batch did not reach Fakturama.
+  - **Batch from the image:** a copy of the sample with reference B17 went unattended from the
+    image to Order PO000006 and Invoice INV000005, paid and verified (fixture reader, Windows
+    OCR). Windows OCR misses the item table's short percent cells; exact sums confirm them (see
+    [How it decides](#how-it-decides)). The clean A17 sample also passed extraction, then stopped
+    in Fakturama, because the VM's test database holds five documents with that reference.
 - **Windows: green end to end** in a Windows 11 ARM VM (Parallels) on this Mac, on the same
   `order.json`: Order PO000002 and Invoice INV000002 saved, the Invoice paid, both verified in
   Data > Documents, in about 1.5 minutes. Earlier runs on the same database covered the create
@@ -186,6 +188,12 @@ Annotated screenshots of that run, in order:
   ZIP and City exactly; a product only by exact SKU with the same name, gross price and VAT; a VAT
   rate only when `VAT <p>%` has value p; a payment method only with zero discount and days. None
   means create; two, a near miss (≤ 2 characters off) or a conflicting definition stop the run.
+- **A percent cell OCR cannot see** (Windows OCR skips short cells such as "10%") counts as
+  confirmed only when it is the one unknown in one of the brief's own sums: the line price
+  (§3.16) for a discount, the VAT total (§4.3) for a VAT rate. Every other value in that sum must
+  be confirmed by OCR, and no other percentage to the hundredth may give the same cents. A reading
+  is confirmed, never corrected. Two unseen VAT rates still go to review: swapped rates on lines
+  with equal nets give the same VAT total.
 - **Every write is read back**: text fields, pop-ups, dates, amounts (typed with a decimal comma,
   as the German currency locale expects), each order line, the totals, and both rows in
   Data > Documents.
@@ -328,8 +336,9 @@ Still open:
 - Windows OCR leaves out short, isolated table cells: the clean sample's "10%", "0%" and one
   "19%" (and the "Disc" header) were missing, also word by word. Zooming the row, cropping and
   padding single cells, and painting out the grid lines did not bring "10%" or "0%" back, so it
-  is not a resolution problem. On Windows the clean sample therefore goes to review (3 of 41
-  fields unconfirmed, which a person approves with `approve`); macOS Vision confirms all 41.
+  is not a resolution problem. The sums confirm all three (see [How it decides](#how-it-decides)),
+  so the clean sample writes `order.json` on Windows too; an image with two unseen VAT rates
+  would still go to review.
 - Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
   stopped them, but they are not usable as readers.
 - Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % scaling. Other
@@ -395,8 +404,7 @@ discarding a stop's editors so a batch goes on, and measured rows in the selecto
    Windows 11 ARM VM at 200 % scaling. Next: an x64 PC at 100 % and 150 %, measure
    `row_header_dx`, and scroll editors so the flow does not depend on the editor's height.
 2. **A second OCR engine for table cells on Windows** (Tesseract, for example): Windows OCR
-   misses short cells even zoomed and alone. A line's discount could also count as confirmed by
-   exact arithmetic from its confirmed quantity, unit price and line total, which fix it uniquely
-   (a line's VAT rate cannot: equal line totals with swapped rates give the same VAT sum).
+   misses short cells even zoomed and alone. Exact sums now confirm a missed discount or a single
+   missed VAT rate; two or more missed VAT rates still need a person.
 3. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
    values, annotated screenshots) for whoever reviews a stopped run.

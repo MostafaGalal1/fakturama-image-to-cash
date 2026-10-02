@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -62,13 +63,16 @@ def _sum_line_nets(order: Order) -> Decimal:
     return money(sum((item.line_net_total for item in order.items), Decimal(0)))
 
 
-def _expected_vat(order: Order) -> Decimal:
-    """Convention: Σ(printed line net × VAT%) over all lines, rounded once at the end.
+def vat_total(lines: Iterable[tuple[Decimal, Decimal]]) -> Decimal:
+    """Convention: Σ(printed line net × VAT%) over (net, VAT%) pairs, rounded once at the end.
 
     A document that rounds VAT per line can differ by a cent; it goes to review, never silently through.
     """
-    raw = sum((item.line_net_total * item.vat_percent / HUNDRED for item in order.items), Decimal(0))
-    return money(raw)
+    return money(sum((net * percent / HUNDRED for net, percent in lines), Decimal(0)))
+
+
+def _expected_vat(order: Order) -> Decimal:
+    return vat_total((item.line_net_total, item.vat_percent) for item in order.items)
 
 
 def _total_issues(order: Order) -> tuple[Issue, ...]:

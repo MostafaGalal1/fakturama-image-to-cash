@@ -54,6 +54,7 @@ def _review_json(result: ExtractionResult) -> str:
         "mismatches": [asdict(mismatch) for mismatch in result.mismatches],
         "issues": [asdict(issue) for issue in result.issues],
         "zoomed_retry": None if result.retry is None else asdict(result.retry),
+        "confirmed_by_arithmetic": list(result.pinned),
         "draft_order": result.order.model_dump(mode="json"),
     }
     return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"

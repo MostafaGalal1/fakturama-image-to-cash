@@ -107,6 +107,8 @@ def _extract(args: argparse.Namespace) -> int:
         print(f"  image-to-cash approve {shell_arg(str(target))} --out {shell_arg(str(args.out))}")
         return EXIT_REVIEW
     print(f"order written to {target}")
+    if result.pinned:
+        print(f"  confirmed by exact sums, as OCR did not see them: {', '.join(result.pinned)}")
     return EXIT_OK
 
 
