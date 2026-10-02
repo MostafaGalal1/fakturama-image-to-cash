@@ -291,7 +291,8 @@ class WindowsUiaBackend:
         return self._clicked is not None and _is_within(self._focused_control(), self._clicked)
 
     def _on_top(self, handle: object, x: float, y: float) -> bool:
-        return _is_within(self._hit(x, y), handle)
+        hit = self._hit(x, y)
+        return _is_within(hit, handle) or _draws(hit, handle)
 
     def _hit(self, x: float, y: float) -> object | None:
         return _safe(lambda: auto.ControlFromPoint(*self._scale.to_pixels(x, y)))
@@ -482,6 +483,15 @@ def _is_within(hit: object | None, target: object) -> bool:
             return True
         hit = _safe(hit.GetParentControl)
     return False
+
+
+def _draws(hit: object | None, target: object) -> bool:
+    """True when the hit is the window that draws a windowless target. UI Automation reports the
+    tab folder under the pointer, not the tab it points at."""
+    if hit is None or _safe(lambda: target.NativeWindowHandle):
+        return False
+    parent = _safe(target.GetParentControl)
+    return parent is not None and bool(_safe(lambda: auto.ControlsAreSame(hit, parent)))
 
 
 def _overlaps(a: Rect, b: Rect) -> bool:

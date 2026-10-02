@@ -105,6 +105,28 @@ def test_popup_option_is_chosen(backend, workbench):
     assert backend.refresh(code).value == "S (Standard rate)"
 
 
+def test_tab_is_clicked(backend, workbench):
+    """A tab has no window of its own: the hit test finds its folder, which must count as the tab."""
+    backend.press_menu(("New", "New Debtor"))
+    tab = wait_for(lambda: by_title(backend.scan(workbench.editor_area()), Role.RADIO, "Miscellaneous"))
+    backend.click(tab)
+    assert wait_for(lambda: backend.refresh(tab).value == "True" or None)
+
+
+def wait_for(probe):
+    deadline = time.monotonic() + WAIT_SECONDS
+    while True:
+        try:
+            found = probe()
+            if found:
+                return found
+        except LookupError:
+            pass
+        if time.monotonic() > deadline:
+            raise AssertionError("timed out")
+        time.sleep(0.2)
+
+
 def test_area_is_captured(backend, workbench, tmp_path):
     shot = backend.capture(workbench.main_window().rect, tmp_path / "main.png")
     assert shot.stat().st_size > 0
