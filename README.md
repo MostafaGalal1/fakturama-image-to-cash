@@ -14,6 +14,13 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
   Order-first flow through the macOS Accessibility API: Order, Debtor (select or create, with its
   payment method), Products (select or create, with their VAT), save, the linked Invoice, the paid
   status, and verification in Data > Documents. Findings: [docs/spike-macos-ax.md](docs/spike-macos-ax.md).
+  Re-run green after the later changes (resume check, Documents categories, measured rows): a live
+  extraction of the clean image, then Order PO000002 and Invoice INV000002 in about 2.5 minutes.
+- **Checked live in the Windows VM:** a re-run of an entered order stops as already entered; a
+  near-duplicate Debtor ("Northstar Office GmbH & Co") and Product (`CHR-ERG-010`) are created
+  beside the originals and the exact rows are picked; a reused VAT rate is opened and its code S
+  confirmed; a near-miss contact ("Kline" for "Klein") stops for review. Not yet live: resuming
+  at the Invoice after a stop that follows the Order's save (unit-tested only).
 - **Windows: green end to end** in a Windows 11 ARM VM (Parallels) on this Mac, on the same
   `order.json`: Order PO000002 and Invoice INV000002 saved, the Invoice paid, both verified in
   Data > Documents, in about 1.5 minutes. Earlier runs on the same database covered the create
