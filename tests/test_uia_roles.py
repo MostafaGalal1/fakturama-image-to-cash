@@ -51,3 +51,10 @@ def test_disabled_and_empty_texts():
 
 def test_a_tab_named_with_a_doubled_ampersand_reads_as_shown():
     assert element("TabItem", name="Northstar Office GmbH && Co, Jonas Weber").title == "Northstar Office GmbH & Co, Jonas Weber"
+
+
+def test_a_list_row_with_a_tick_box_is_a_checkbox():
+    """Fakturama's "Save Parts" rows: a list item whose tick the adapter reads from the list."""
+    row = element("ListItem", name="New Order", toggled=1)
+    assert (row.role, row.title, row.value) == (Role.CHECKBOX, "New Order", "1")
+    assert element("ListItem", name="Item").role is Role.OTHER  # no tick box: not a checkbox

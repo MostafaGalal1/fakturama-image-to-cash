@@ -1,6 +1,6 @@
 import pytest
 
-from image_to_cash.drive.backend.win_units import DoubleClick, Scale, menu_label, focus_owner
+from image_to_cash.drive.backend.win_units import DoubleClick, Scale, focus_owner, menu_label, tick_from_state
 from image_to_cash.drive.elements import Rect
 
 
@@ -61,3 +61,8 @@ def test_a_click_elsewhere_or_later_does_not_wait():
     assert DOUBLE_CLICK.wait_before((10.0, 100, 200), now=10.2, x=110, y=200) == 0.0
     assert DOUBLE_CLICK.wait_before((10.0, 100, 200), now=10.6, x=100, y=200) == 0.0
     assert DOUBLE_CLICK.wait_before(None, now=10.0, x=100, y=200) == 0.0
+
+
+def test_a_list_rows_state_image_tells_its_tick():
+    """SWT draws a row's tick box as state image 1 (unticked) or 2 (ticked); grey or none is no answer."""
+    assert [tick_from_state(state) for state in (0x1000, 0x2000, 0x2003, 0x0, 0x3000, 0x4000)] == [0, 1, 1, None, None, None]

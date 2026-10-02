@@ -30,7 +30,7 @@ from image_to_cash.drive.backend.base import BackendError, FocusNotTaken, Unsafe
 from image_to_cash.drive.backend.keys import parse_chord  # noqa: E402
 from image_to_cash.drive.backend.safety import require_copied_text, require_keyboard, wait_until_frontmost  # noqa: E402
 from image_to_cash.drive.backend.uia_roles import UiaRecord, element_from_uia  # noqa: E402
-from image_to_cash.drive.backend.win_units import Scale, focus_owner  # noqa: E402
+from image_to_cash.drive.backend.win_units import Scale, focus_owner, tick_from_state  # noqa: E402
 from image_to_cash.drive.backend.window_capture import NORMAL_WINDOW_LAYER, WindowInfo, crop_box, window_for  # noqa: E402
 from image_to_cash.drive.elements import Element, Rect, Role, Window, distinct  # noqa: E402
 from image_to_cash.drive.layout import WINDOWS_LAYOUT  # noqa: E402
@@ -108,8 +108,12 @@ class WindowsUiaBackend:
 
     def press(self, element: Element) -> None:
         """A native button (checkboxes too) gets a posted click, so a dialog it opens cannot block
-        the bot; anything else its UI Automation action. Callers read every effect back."""
+        the bot; a list row's tick box a click on the box; anything else its UI Automation action.
+        Callers read every effect back."""
         handle = _handle(element)
+        if element.native_role == "ListItem" and element.role is Role.CHECKBOX:
+            self._click_tick_box(handle)
+            return
         hwnd = _safe(lambda: handle.NativeWindowHandle) or 0
         if hwnd and win32.class_name(hwnd) == "Button":
             win32.post_click(hwnd)
@@ -306,6 +310,17 @@ class WindowsUiaBackend:
     def _hit(self, x: float, y: float) -> object | None:
         return _safe(lambda: auto.ControlFromPoint(*self._scale.to_pixels(x, y)))
 
+    def _click_tick_box(self, row: object) -> None:
+        """The box has no control of its own: SWT draws it left of the row's text."""
+        frame = self._rect(row)
+        text = next((child for child in _safe(row.GetChildren) or () if _native(child) == "Text"), None)
+        if text is None:
+            raise BackendError("the list row shows no text beside its tick box")
+        box_right = self._rect(text).x
+        if box_right <= frame.x:
+            raise BackendError("the list row shows no tick box left of its text")
+        self.click(self._element(row, frame), at=((frame.x + box_right) / 2, frame.center[1]))
+
     def _open_list(self, handle: object) -> list[object]:
         self._guard()
         expand = _safe(lambda: handle.GetPattern(auto.PatternId.ExpandCollapsePattern))
@@ -363,7 +378,7 @@ class WindowsUiaBackend:
             enabled=bool(_safe(lambda: handle.IsEnabled)),
             multiline=native == "Edit" and _multiline(handle),
             editable=native == "ComboBox" and any(_native(c) == "Edit" for c in _safe(handle.GetChildren) or ()),
-            toggled=_toggled(handle) if native == "CheckBox" else None,
+            toggled=_toggled(handle) if native == "CheckBox" else _ticked(handle) if native == "ListItem" else None,
             selected=_selected(handle) if native in ("RadioButton", "TabItem") else None,
         )
         return element_from_uia(record, handle)
@@ -473,6 +488,17 @@ def _toggled(handle: object) -> int | None:
         return int(state)
     legacy = _safe(lambda: handle.GetPattern(auto.PatternId.LegacyIAccessiblePattern).State)
     return None if legacy is None else int(bool(legacy & STATE_CHECKED))
+
+
+def _ticked(row: object) -> int | None:
+    """A native list row's tick box (Fakturama's "Save Parts"), read from the list itself."""
+    parent = _safe(row.GetParentControl)
+    hwnd = _safe(lambda: parent.NativeWindowHandle) if parent is not None else None
+    if not hwnd or win32.class_name(hwnd) != "SysListView32":
+        return None
+    rows = [child for child in _safe(parent.GetChildren) or () if _native(child) == "ListItem"]
+    index = next((i for i, child in enumerate(rows) if _safe(lambda child=child: auto.ControlsAreSame(child, row))), None)
+    return None if index is None else tick_from_state(win32.list_item_state(hwnd, index))
 
 
 def _selected(handle: object) -> bool | None:

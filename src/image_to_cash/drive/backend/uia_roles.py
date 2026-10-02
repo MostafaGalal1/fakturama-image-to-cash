@@ -41,7 +41,7 @@ class UiaRecord:
     enabled: bool = True
     multiline: bool = False  # an Edit with ES_MULTILINE
     editable: bool = False  # a ComboBox that holds an Edit
-    toggled: int | None = None  # Toggle pattern: 0 off, 1 on, 2 indeterminate
+    toggled: int | None = None  # Toggle pattern: 0 off, 1 on, 2 indeterminate; a list row's tick box
     selected: bool | None = None  # SelectionItem pattern, or the MSAA selected/checked state
 
 
@@ -52,6 +52,8 @@ def element_from_uia(record: UiaRecord, handle: object = None) -> Element:
         role = Role.TEXT_AREA
     if native == "ComboBox" and record.editable:
         role = Role.COMBO_BOX
+    if native == "ListItem" and record.toggled is not None:
+        role = Role.CHECKBOX  # a row of a check list, named by its text
     title, value = record.name, record.value
     if native == "TabItem" and title:
         title = without_mnemonics(title)  # a tab named "GmbH && Co" shows "GmbH & Co"

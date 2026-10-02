@@ -168,11 +168,15 @@ class Workbench:
     def dialog_open(self, title: str) -> bool:
         return any(w.title == title for w in self.ui.windows())
 
-    def _focus_open_editor(self, what: str) -> None:
+    def active_editor(self, what: str) -> Element:
+        """The selected editor tab: File > Close and Save act on it once it is the active part."""
         selected = [tab for tab in self.editor_tabs() if _selected(tab)]
         if len(selected) != 1:
             raise NeedsReview("editor_tab", {"tab": what, "found": str(len(selected))})
-        self.ui.click(selected[0])
+        return selected[0]
+
+    def _focus_open_editor(self, what: str) -> None:
+        self.ui.click(self.active_editor(what))
 
     def close_unchanged_editor(self, what: str) -> None:
         """File > Close on the open editor, which must hold no changes: then no dialog asks."""

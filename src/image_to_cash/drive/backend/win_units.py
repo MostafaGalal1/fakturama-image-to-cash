@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from image_to_cash.drive.elements import Rect
 
 BASE_DPI = 96  # Windows' 100 % scale
+STATE_IMAGE_MASK, STATE_IMAGE_SHIFT = 0xF000, 12  # a list-view row's state image index
+TICKS = {1: 0, 2: 1}  # SWT's state images for an unticked and a ticked row (3 and 4 are greyed)
 
 
 @dataclass(frozen=True)
@@ -78,3 +80,10 @@ def without_mnemonics(raw: str) -> str:
     """Text as Windows draws it: "&&" shows one "&", and a single "&" only underlines the next
     letter. Menus and SWT's tabs name themselves with these marks ("GmbH && Co")."""
     return raw.replace("&&", "\0").replace("&", "").replace("\0", "&")
+
+
+def tick_from_state(state: int) -> int | None:
+    """A list-view row's tick from its item state: 1 ticked, 0 unticked, None for a greyed box or
+    a row without one. SWT's check tables (Fakturama's "Save Parts") draw the box as this state
+    image, and UI Automation reports neither a Toggle pattern nor a checked state for it."""
+    return TICKS.get((state & STATE_IMAGE_MASK) >> STATE_IMAGE_SHIFT)
