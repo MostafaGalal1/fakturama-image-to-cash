@@ -14,7 +14,7 @@ from image_to_cash.drive.fakturama.grids import column_centres, copy_all, copy_l
 from image_to_cash.drive.fakturama.rules import check_line
 from image_to_cash.drive.formats import GERMAN, format_amount, parse_amount
 from image_to_cash.drive.fakturama import controls as find
-from image_to_cash.drive.locate import by_title, label, right_of_label
+from image_to_cash.drive.locate import LocatorError, by_title, label, right_of_label
 from image_to_cash.drive.report import Outcome
 from image_to_cash.errors import NeedsReview
 from image_to_cash.model import Totals
@@ -23,6 +23,9 @@ from image_to_cash.normalized import NormalizedOrder, OrderLine
 NEW_ORDER = "New Order"
 QTY, UNIT_PRICE, DISCOUNT = "Qty.", "U.Price", "Discount"
 GRID_DX = 250  # from the "Items" label into the grid
+
+
+FOLLOW_UP_INVOICE_HELP = frozenset({"Create: New Invoice", "Invoice"})  # Windows: a toolbar button's help is its name
 
 
 class DocumentEditor:
@@ -118,8 +121,11 @@ class DocumentEditor:
         for name, want in expected.items():
             if shown_totals[name] != want:
                 raise NeedsReview("totals_mismatch", {"field": name})
-        shipping = [e for e in self.scan() if e.role is Role.COMBO_BOX and (e.help or "").startswith("It's possible to enter a different shipp")]
-        if len(shipping) != 1 or shown(self.ctx.ui, shipping[0]) != "Free of shipping costs":
+        try:
+            shipping = find.shipping(self.scan())
+        except LocatorError:
+            raise NeedsReview("shipping_not_free") from None
+        if shown(self.ctx.ui, shipping) != "Free of shipping costs":
             raise NeedsReview("shipping_not_free")
 
 
@@ -156,7 +162,7 @@ class OrderEditor(DocumentEditor):
         self.activate()
         area = self.ctx.wb.editor_area()
         buttons = [
-            e for e in self.scan() if e.role is Role.BUTTON and e.title == "Invoice" and e.help == "Create: New Invoice" and area.contains(e.rect)
+            e for e in self.scan() if e.role is Role.BUTTON and e.title == "Invoice" and e.help in FOLLOW_UP_INVOICE_HELP and area.contains(e.rect)
         ]
         if len(buttons) != 1:
             raise NeedsReview("control_not_found", {"control": "follow-up Invoice"})

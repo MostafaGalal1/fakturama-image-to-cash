@@ -57,3 +57,9 @@ def product_description(fields: Controls) -> Element:
 
 def add_address_button(controls: Controls) -> Element:
     return by_help_or(controls, Role.BUTTON, "add a new address", lambda c: by_title(c, Role.BUTTON, "+"))
+
+
+def shipping(controls: Controls) -> Element:
+    return by_help_or(
+        controls, Role.COMBO_BOX, "It's possible to enter a different shipp", lambda c: right_of_label(c, "Shipping", role=Role.COMBO_BOX)
+    )

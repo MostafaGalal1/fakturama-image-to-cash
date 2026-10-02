@@ -27,6 +27,9 @@ ORDER = (
     Element(Role.TEXT_FIELD, Rect(487, 461, 120, 19), value="Oct 2, 2026"),
     Element(Role.LABEL, Rect(624, 462, 30, 16), value="Value"),
     Element(Role.TEXT_FIELD, Rect(660, 459, 120, 19), value="0,00 €"),
+    Element(Role.LABEL, Rect(842, 505, 48, 16), value="Shipping"),
+    Element(Role.COMBO_BOX, Rect(895, 503, 353, 20), value="Free of shipping costs"),
+    Element(Role.TEXT_FIELD, Rect(896.5, 504.5, 333, 17), value="Free of shipping costs"),  # the combo's own edit field
 )
 
 
@@ -38,6 +41,7 @@ ORDER = (
         (controls.address_picker, 5),
         (controls.vat_mode, 8),
         (controls.item_picker, 10),
+        (controls.shipping, 20),
         (controls.paid_box, 14),
         (controls.payment_date, 16),
         (controls.paid_value, 18),
