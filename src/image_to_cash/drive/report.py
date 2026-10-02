@@ -56,7 +56,7 @@ class RunLog:
 
 def annotate(shot: Path, *, area: Rect, target: Rect, label: str, out: Path) -> Path:
     """Copy `shot` (a capture of `area`) to `out` with `target` boxed and labelled."""
-    if target.x < area.x or target.y < area.y or target.right > area.right or target.bottom > area.bottom:
+    if not area.contains(target):
         raise ValueError(f"target {target} lies outside the captured area {area}")
     with Image.open(shot) as source:
         marked = source.convert("RGB")

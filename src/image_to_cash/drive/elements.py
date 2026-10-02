@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -17,6 +18,8 @@ class Role(StrEnum):
     RADIO = "radio"
     IMAGE = "image"
     LINK = "link"
+    TAB_GROUP = "tab_group"
+    WINDOW = "window"
     OTHER = "other"
 
 
@@ -40,6 +43,15 @@ class Rect:
     @property
     def center(self) -> tuple[float, float]:
         return (self.x + self.width / 2, self.y + self.height / 2)
+
+    def contains(self, other: Rect) -> bool:
+        return (
+            self.x <= other.x and self.y <= other.y and other.right <= self.right and other.bottom <= self.bottom
+        )
+
+    def rounded(self) -> tuple[int, int, int, int]:
+        """Whole points, so frames read twice compare equal despite sub-point noise."""
+        return (round(self.x), round(self.y), round(self.width), round(self.height))
 
 
 @dataclass(frozen=True)
@@ -66,3 +78,15 @@ class Window:
     title: str
     rect: Rect
     handle: object = field(default=None, compare=False, hash=False, repr=False)
+
+
+def distinct(elements: Iterable[Element]) -> tuple[Element, ...]:
+    """Drop repeats of a control reached twice, e.g. a table cell listed under its row and its column."""
+    seen: set[tuple[Role, tuple[int, int, int, int]]] = set()
+    kept = []
+    for element in elements:
+        key = (element.role, element.rect.rounded())
+        if key not in seen:
+            seen.add(key)
+            kept.append(element)
+    return tuple(kept)

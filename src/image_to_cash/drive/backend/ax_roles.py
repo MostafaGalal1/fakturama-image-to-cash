@@ -17,6 +17,8 @@ AX_ROLES = {
     "AXRadioButton": Role.RADIO,
     "AXImage": Role.IMAGE,
     "AXLink": Role.LINK,
+    "AXTabGroup": Role.TAB_GROUP,
+    "AXWindow": Role.WINDOW,
 }
 DISABLED = frozenset({"False", "0"})
 

@@ -45,3 +45,8 @@ def test_annotation_target_must_lie_inside_the_capture(tmp_path):
     Image.new("RGB", (100, 100), "white").save(shot)
     with pytest.raises(ValueError, match="outside"):
         annotate(shot, area=Rect(0, 0, 100, 100), target=Rect(90, 90, 20, 20), label="x", out=tmp_path / "m.png")
+
+
+def test_default_clock_records_utc_times(tmp_path):
+    step = RunLog(tmp_path / "steps.jsonl").record("preflight", Outcome.CHECKED)
+    assert datetime.fromisoformat(step.at).utcoffset().total_seconds() == 0

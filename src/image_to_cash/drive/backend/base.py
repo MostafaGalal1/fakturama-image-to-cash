@@ -1,8 +1,8 @@
 """The UI backend contract every OS adapter implements (design §3, §5).
 
 Two kinds of operation:
-- Accessibility only (`windows`, `press_menu`, `scan`, `refresh`, `press`, `choose`): no mouse or
-  keyboard events, so they cannot reach another app.
+- Accessibility only (`windows`, `press_menu`, `tree`, `scan`, `refresh`, `press`, `choose`): no
+  mouse or keyboard events, so they cannot reach another app.
 - Input events (`click`, `type_text`, `key`, `copy_selection`): sent only while Fakturama is the
   frontmost app, checked before every event; otherwise they raise UnsafeToAct.
 """
@@ -33,8 +33,13 @@ class UiBackend(Protocol):
         """Press a menu-bar item, e.g. ("Data", "Documents")."""
         ...
 
+    def tree(self, window: Window) -> tuple[Element, ...]:
+        """Every element in the window's accessibility tree. Dialogs expose all their controls;
+        editors inside tab folders do not, so use `scan` for those."""
+        ...
+
     def scan(self, area: Rect) -> tuple[Element, ...]:
-        """Every control inside `area` (on screen, in points)."""
+        """Every control inside `area` (on screen, in points), found by hit-testing."""
         ...
 
     def refresh(self, element: Element) -> Element:
