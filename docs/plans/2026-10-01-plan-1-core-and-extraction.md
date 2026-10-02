@@ -2589,7 +2589,8 @@ def test_approve_refuses_order_json_as_a_draft_and_keeps_it(
 def test_help_lists_the_exit_codes(capsys):
     with pytest.raises(SystemExit):
         cli.main(["--help"])
-    assert "3 needs review" in capsys.readouterr().out
+    help_text = " ".join(capsys.readouterr().out.split())  # argparse wraps to the terminal width
+    assert "3 needs review" in help_text
 
 
 def test_exit_codes_are_the_documented_contract():
