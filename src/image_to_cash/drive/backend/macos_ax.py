@@ -11,19 +11,24 @@ Built on docs/spike-macos-ax.md:
 
 from __future__ import annotations
 
-import subprocess
-import tempfile
+import io
 import time
 from collections.abc import Sequence
 from pathlib import Path
 
 import ApplicationServices as AX
 import Quartz
-from AppKit import NSPasteboard, NSPasteboardItem, NSRunningApplication
+from AppKit import (
+    NSBitmapImageFileTypePNG,
+    NSBitmapImageRep,
+    NSPasteboard,
+    NSPasteboardItem,
+    NSRunningApplication,
+)
 from PIL import Image
 
 from image_to_cash.drive.backend.ax_roles import AX_ROLES, element_from_record
-from image_to_cash.drive.backend.base import BackendError, UnsafeToAct
+from image_to_cash.drive.backend.base import BackendError, FocusNotTaken, UnsafeToAct
 from image_to_cash.drive.backend.keys import MAC_KEY_CODES, parse_chord
 from image_to_cash.drive.backend.safety import is_within, require_copied_text, require_keyboard, wait_until_frontmost
 from image_to_cash.drive.backend.window_capture import NORMAL_WINDOW_LAYER, WindowInfo, crop_box, window_for
@@ -40,10 +45,13 @@ TREE_DEPTH = 12
 EVENT_PAUSE_SECONDS = 0.02
 TYPE_PAUSE_SECONDS = 0.01
 MENU_OPEN_SECONDS = 0.5
+MENU_ATTEMPTS = 2
+MENU_SETTLE_SECONDS = 0.3
 CLIPBOARD_TIMEOUT_SECONDS = 2.0
 CLIPBOARD_POLL_SECONDS = 0.05
 CLICK_SETTLE_SECONDS = 1.5  # a window raised a moment ago may still be under another one
-CAPTURE_TIMEOUT_SECONDS = 30
+FOCUS_SETTLE_SECONDS = 1.0
+TEXT_ROLES = frozenset({"AXTextField", "AXTextArea", "AXComboBox"})
 FOCUS_MOVING_KEYS = frozenset({"tab", "return", "escape"})
 MODIFIER_FLAGS = {
     "primary": Quartz.kCGEventFlagMaskCommand,
@@ -128,26 +136,68 @@ class MacAxBackend:
     def press(self, element: Element) -> None:
         self._perform(_handle(element), "AXPress")
 
-    def choose(self, popup: Element, option: str) -> None:
-        """Opens a menu over the screen, so it needs Fakturama in front like any input."""
-        handle = _handle(popup)
+    def focused(self) -> Element | None:
+        handle = self._attr(self._app, "AXFocusedUIElement")
+        return None if handle is None or not self._has_frame(handle) else self._element(handle)
+
+    def element_at(self, x: float, y: float) -> Element | None:
+        handle = self._hit(self._app, x, y)
+        return None if handle is None or not self._has_frame(handle) else self._element(handle)
+
+    def focus(self, element: Element) -> None:
+        """Give a control the keyboard focus without a click, for one that something covers
+        (the product selector's search field sits under its dialog's title bar)."""
+        handle = _handle(element)
         self._guard()
-        self._perform(handle, "AXPress")
-        menus = wait_until(lambda: self._menus(handle), what="the pop-up menu", timeout=MENU_OPEN_SECONDS * 4)
+        self._set(handle, "AXFocused", True)
+        self._clicked = handle
+        try:
+            wait_until(self._clicked_has_focus, what="the control to take the focus", timeout=FOCUS_SETTLE_SECONDS, poll=0.05)
+        except WaitTimeout:
+            raise UnsafeToAct("the control did not take the keyboard focus") from None
+
+    def choose(self, popup: Element, option: str) -> None:
+        """Opens a menu over the screen, so it needs Fakturama in front like any input.
+
+        Titles are compared without surrounding spaces: Fakturama pads some ("Credit transfer ").
+        """
+        if _same_option(self.refresh(popup).value, option):
+            return
+        menus = self._open_menu(_handle(popup))
         try:
             items = [item for menu in menus for item in self._attr(menu, "AXChildren") or ()]
-            matches = [item for item in items if self._attr(item, "AXTitle") == option]
+            matches = [item for item in items if _same_option(_plain(self._attr(item, "AXTitle")), option)]
             if len(matches) != 1:
                 raise BackendError(f"pop-up has {len(matches)} options titled {option!r}")
             self._perform(matches[0], "AXPress")
         except BaseException:
-            for menu in menus:
-                AX.AXUIElementPerformAction(menu, "AXCancel")  # never leave a menu holding the keyboard
+            _cancel(menus)
             raise
         try:
-            wait_until(lambda: self.refresh(popup).value == option, what=f"the pop-up to show {option!r}", timeout=2)
+            wait_until(lambda: _same_option(self.refresh(popup).value, option), what=f"the pop-up to show {option!r}", timeout=2)
         except WaitTimeout:
             raise BackendError(f"pop-up shows {self.refresh(popup).value!r} after choosing {option!r}") from None
+
+    def options(self, popup: Element) -> tuple[str, ...]:
+        menus = self._open_menu(_handle(popup))
+        try:
+            titles = (_plain(self._attr(item, "AXTitle")) for menu in menus for item in self._attr(menu, "AXChildren") or ())
+            return tuple(title.strip() for title in titles if title and title.strip())
+        finally:
+            _cancel(menus)
+
+    def _open_menu(self, handle: object) -> list[object]:
+        """Right after Tab moves the focus out of the editor, a press can fail to open the menu
+        (once it stepped the value instead), so settle first and try twice. Callers read back."""
+        for _ in range(MENU_ATTEMPTS):
+            time.sleep(MENU_SETTLE_SECONDS)
+            self._guard()
+            self._perform(handle, "AXPress")
+            try:
+                return wait_until(lambda: self._menus(handle), what="the pop-up menu", timeout=MENU_OPEN_SECONDS * 4)
+            except WaitTimeout:
+                continue
+        raise BackendError("the pop-up menu did not open")
 
     def capture(self, area: Rect, path: Path) -> Path:
         """Fakturama's own pixels only: the window holding `area` is captured, then cropped."""
@@ -156,14 +206,19 @@ class MacAxBackend:
         except ValueError as error:
             raise BackendError(str(error)) from None
         path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory() as scratch:
-            whole = Path(scratch) / "window.png"
-            command = ["screencapture", "-x", "-o", f"-l{window.window_id}", str(whole)]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=CAPTURE_TIMEOUT_SECONDS)
-            if result.returncode != 0 or not whole.is_file():
-                raise BackendError(f"window capture failed (Screen Recording permission?): {result.stderr.strip()}")
-            with Image.open(whole) as image:
-                image.crop(crop_box(window.bounds, area, image.width)).save(path)
+        # `screencapture -l` returns the whole main window for a modal dialog, so ask Quartz for
+        # exactly this one window's pixels.
+        shot = Quartz.CGWindowListCreateImage(
+            Quartz.CGRectNull,
+            Quartz.kCGWindowListOptionIncludingWindow,
+            window.window_id,
+            Quartz.kCGWindowImageBoundsIgnoreFraming,
+        )
+        if shot is None:
+            raise BackendError("window capture failed (Screen Recording permission?)")
+        png = NSBitmapImageRep.alloc().initWithCGImage_(shot).representationUsingType_properties_(NSBitmapImageFileTypePNG, {})
+        with Image.open(io.BytesIO(bytes(png))) as image:
+            image.crop(crop_box(window.bounds, area, image.width)).save(path)
         return path
 
     # Input: only while Fakturama holds the keyboard and the front window.
@@ -184,11 +239,22 @@ class MacAxBackend:
             for kind in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
                 event = Quartz.CGEventCreateMouseEvent(None, kind, (x, y), Quartz.kCGMouseButtonLeft)
                 Quartz.CGEventSetIntegerValueField(event, Quartz.kCGMouseEventClickState, click_state)
+                Quartz.CGEventSetFlags(event, 0)  # else Cmd from an earlier chord makes it a toggling Cmd-click
                 Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
                 time.sleep(EVENT_PAUSE_SECONDS)
         self._clicked = handle
+        if self._attr(handle, "AXRole") in TEXT_ROLES:
+            try:
+                wait_until(self._clicked_has_focus, what="the field to take the focus", timeout=FOCUS_SETTLE_SECONDS, poll=0.05)
+            except WaitTimeout:
+                raise FocusNotTaken("the clicked field did not take the keyboard focus") from None
 
     def type_text(self, text: str) -> None:
+        if self._clicked is not None:  # a click or focus change can take a moment to land
+            try:
+                wait_until(self._clicked_has_focus, what="the field to take the focus", timeout=FOCUS_SETTLE_SECONDS, poll=0.05)
+            except WaitTimeout:
+                raise FocusNotTaken("the clicked field never took the keyboard focus; nothing was typed") from None
         for char in text:
             self._guard_typing()
             units = len(char.encode("utf-16-le")) // 2
@@ -212,6 +278,25 @@ class MacAxBackend:
             time.sleep(EVENT_PAUSE_SECONDS)
         if parsed.key in FOCUS_MOVING_KEYS:
             self._clicked = None
+
+    def paste_text(self, text: str, into: Element) -> None:
+        board = NSPasteboard.generalPasteboard()
+        saved = _save_clipboard(board)
+        try:
+            board.clearContents()
+            board.setString_forType_(text, "public.utf8-plain-text")
+            self.key("primary+v")
+            # Restore only once the field shows the text (Fakturama reads the clipboard late), or
+            # once the field is gone: a selector that auto-accepts a single hit closes at once.
+            handle = _handle(into)
+            wait_until(
+                lambda: self._attr(handle, "AXRole") is None or self.refresh(into).value == text,
+                what="the pasted text",
+                timeout=CLIPBOARD_TIMEOUT_SECONDS,
+            )
+        finally:
+            if not _restore_clipboard(board, saved):
+                raise BackendError("pasted the text, but could not restore the clipboard")
 
     def copy_selection(self) -> str:
         board = NSPasteboard.generalPasteboard()
@@ -249,9 +334,12 @@ class MacAxBackend:
         self._guard()
         if self._clicked is None:
             return
-        focused = self._attr(self._app, "AXFocusedUIElement")
-        if not is_within(focused, self._clicked, lambda e: self._attr(e, "AXParent")):
+        if not self._clicked_has_focus():
             raise UnsafeToAct("keyboard focus moved away from the field that was clicked; refusing to type")
+
+    def _clicked_has_focus(self) -> bool:
+        focused = self._attr(self._app, "AXFocusedUIElement")
+        return is_within(focused, self._clicked, lambda e: self._attr(e, "AXParent"))
 
     def _on_top(self, handle: object, x: float, y: float) -> bool:
         return is_within(self._hit(self._system, x, y), handle, lambda e: self._attr(e, "AXParent"))
@@ -373,6 +461,15 @@ def _handle(element: Element) -> object:
     if element.handle is None:
         raise BackendError("element was not read from the live app (no handle)")
     return element.handle
+
+
+def _cancel(menus: list[object]) -> None:
+    for menu in menus:
+        AX.AXUIElementPerformAction(menu, "AXCancel")  # never leave a menu holding the keyboard
+
+
+def _same_option(shown: str | None, option: str) -> bool:
+    return shown is not None and shown.strip() == option.strip()
 
 
 def _plain(value: object) -> str | None:

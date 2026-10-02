@@ -66,17 +66,10 @@ attribution trailer**.
 - **Input-event operations** (`click`, `type_text`, `key`, `choose`, `copy_selection`) wait for
   the live contract test, which needs the Mac to itself.
 
-## Next: Plan 2b (needs a live session with the Mac to itself)
+## Plan 2b: done (2026-10-02)
 
-1. Run `FAKTURAMA_LIVE=1 uv run pytest tests/test_macos_ax_contract.py`.
-2. Explore what is still open in the spike doc:
-   - the "Select the address" and product pickers with real rows;
-   - editing item lines in the order grid;
-   - reading the order totals;
-   - the follow-up Invoice action;
-   - reading Data → Documents through the clipboard;
-   - number entry under `de/DE`;
-   - the payment-code options.
-3. Then write the screen objects, the flow (design §6) and the `image-to-cash drive` command, test-first
-   against recorded snapshots.
-4. Run end to end against a database backup. That run produces the screenshots for the deliverable.
+Built in the live session rather than as a separate plan file: the screen objects under
+`src/image_to_cash/drive/fakturama/`, the flow (`drive/flow.py`) and `image-to-cash drive`. The
+end-to-end run on an empty database saved PO000001 (open) and INV000001 (paid) in 4 minutes; its
+log and annotated screenshots are in the README. What the runs taught is in
+`docs/spike-macos-ax.md` ("Settled in the live walkthrough", "Found by the end-to-end runs").

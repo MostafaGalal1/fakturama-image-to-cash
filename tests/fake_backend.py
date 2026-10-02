@@ -39,9 +39,26 @@ class FakeBackend:
     def press(self, element: Element) -> None:
         self.calls.append(("press", element.rect))
 
+    def element_at(self, x: float, y: float) -> Element | None:
+        return None
+
+    def focused(self) -> Element | None:
+        return self._focused
+
     def choose(self, popup: Element, option: str) -> None:
         self.calls.append(("choose", option))
         self._values[popup.rect] = option
+
+    def options(self, popup: Element) -> tuple[str, ...]:
+        return ()
+
+    def focus(self, element: Element) -> None:
+        self.calls.append(("focus", element.rect))
+        self._focused, self._typed = element, ""
+
+    def paste_text(self, text: str, into: Element) -> None:
+        self.calls.append(("paste", text))
+        self._values[into.rect] = text
 
     def click(self, element: Element, *, at: tuple[float, float] | None = None, count: int = 1) -> None:
         self.calls.append(("click", element.rect) if at is None and count == 1 else ("click", element.rect, at, count))

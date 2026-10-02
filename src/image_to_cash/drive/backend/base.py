@@ -1,10 +1,10 @@
 """The UI backend contract every OS adapter implements (design §3, §5).
 
 Two kinds of operation:
-- Accessibility only (`windows`, `press_menu`, `tree`, `scan`, `refresh`, `press`): no mouse or
+- Accessibility only (`windows`, `press_menu`, `tree`, `scan`, `element_at`, `focused`, `refresh`, `press`): no mouse or
   keyboard events, so they cannot reach another app.
-- Input (`click`, `type_text`, `key`, `copy_selection`, and `choose`, whose menu opens over the
-  screen): only while Fakturama holds the keyboard focus and the front window, checked before
+- Input (`click`, `type_text`, `key`, `copy_selection`, `paste_text`, `focus`, and `choose` and
+  `options`, whose menu opens over the screen): only while Fakturama holds the keyboard focus and the front window, checked before
   every event; a click only when the target itself is under the pointer; otherwise UnsafeToAct.
 - `bring_to_front` is called once, at the start of a run.
 """
@@ -24,6 +24,11 @@ class BackendError(RuntimeError):
 
 class UnsafeToAct(BackendError):
     """Sending input now could reach another app (Fakturama is not frontmost)."""
+
+
+class FocusNotTaken(UnsafeToAct):
+    """The clicked control never took the keyboard focus, so nothing was typed. A freshly opened
+    editor can spend its first click on activating itself; clicking again is safe."""
 
 
 class UiBackend(Protocol):
@@ -56,8 +61,29 @@ class UiBackend(Protocol):
         """The control's default accessibility action (a button press, a checkbox toggle)."""
         ...
 
+    def focused(self) -> Element | None:
+        """The control in Fakturama that holds its keyboard focus."""
+        ...
+
+    def element_at(self, x: float, y: float) -> Element | None:
+        """The innermost control at a screen point, e.g. a grid that exposes no children."""
+        ...
+
     def choose(self, popup: Element, option: str) -> None:
-        """Pick the pop-up option titled exactly `option`."""
+        """Pick the pop-up option titled `option` (surrounding spaces ignored)."""
+        ...
+
+    def options(self, popup: Element) -> tuple[str, ...]:
+        """The pop-up's option titles, read by opening its menu and cancelling it."""
+        ...
+
+    def focus(self, element: Element) -> None:
+        """Give a control the keyboard focus without clicking it (for one something covers)."""
+        ...
+
+    def paste_text(self, text: str, into: Element) -> None:
+        """Enter `text` in one edit through the clipboard, then restore the clipboard. A search
+        box filters on every edit, and one that auto-accepts a single hit must see the whole text."""
         ...
 
     def click(self, element: Element, *, at: tuple[float, float] | None = None, count: int = 1) -> None:
