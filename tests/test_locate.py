@@ -79,6 +79,28 @@ def test_field_too_far_from_its_label_is_not_taken():
         right_of_label(elements, "Name")
 
 
+def test_a_short_label_owns_the_field_after_its_column(  # Windows: a label is as wide as its text
+):
+    elements = (
+        Element(Role.LABEL, Rect(639, 160, 82, 16), value="Currency locale"),
+        Element(Role.POPUP, Rect(781, 158, 301, 20), value="Afghanistan"),
+        Element(Role.LABEL, Rect(639, 292, 134, 16), value="decimal places (currency)"),
+        Element(Role.TEXT_FIELD, Rect(781, 291, 301, 19), value="2"),
+    )
+    assert right_of_label(elements, "Currency locale", role=Role.POPUP) is elements[1]
+    assert right_of_label(elements, "decimal places (currency)") is elements[3]
+
+
+def test_a_column_does_not_stretch_a_label_in_another_column():
+    elements = (
+        Element(Role.LABEL, Rect(0, 0, 50, 16), value="Name"),
+        Element(Role.LABEL, Rect(300, 40, 200, 16), value="a long label elsewhere"),
+        Element(Role.TEXT_FIELD, Rect(200, 0, 100, 16)),
+    )
+    with pytest.raises(LocatorError, match="no text_field right of label 'Name'"):
+        right_of_label(elements, "Name")
+
+
 def test_icons_found_by_help_text(ax_snapshot):
     picker = by_help(ax_snapshot("order_editor"), Role.IMAGE, "Pick an address from the list of all contacts")
     assert picker.rect.width == 22

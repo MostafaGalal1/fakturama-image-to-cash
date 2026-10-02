@@ -5,6 +5,7 @@ window capture. Windows only; imported by windows_uia.py alone.
 from __future__ import annotations
 
 import ctypes
+import threading
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -35,6 +36,8 @@ MF_GRAYED, MF_DISABLED = 0x0001, 0x0002
 NO_COMMAND = 0xFFFFFFFF  # GetMenuItemID's answer for an item that opens a submenu
 INPUT_MOUSE, INPUT_KEYBOARD = 0, 1
 KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE = 0x0001, 0x0002, 0x0004
+MOUSEEVENTF_MOVE = 0x0001
+GA_ROOTOWNER, SW_MINIMIZE = 3, 6
 MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
 CF_UNICODETEXT = 13
 NOT_MEMORY_FORMATS = frozenset({2, 3, 9, 14, 0x80, 0x82, 0x83, 0x8E})  # GDI handles, not memory blocks
@@ -134,6 +137,10 @@ def _signatures() -> None:
         ("GetClipboardData", (wintypes.UINT,), H),
         ("SetClipboardData", (wintypes.UINT, H), H),
         ("GetClipboardSequenceNumber", (), wintypes.DWORD),
+        ("GetMessageW", (ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT), wintypes.BOOL),
+        ("TranslateMessage", (ctypes.POINTER(wintypes.MSG),), wintypes.BOOL),
+        ("DispatchMessageW", (ctypes.POINTER(wintypes.MSG),), ctypes.c_ssize_t),
+        ("GetAncestor", (wintypes.HWND, wintypes.UINT), wintypes.HWND),
         ("CreateWindowExW", (wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_int, ctypes.c_int,
                              ctypes.c_int, ctypes.c_int, wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID), wintypes.HWND),
         ("GetWindowDC", (wintypes.HWND,), wintypes.HDC),
@@ -169,6 +176,16 @@ _signatures()
 
 
 # DPI.
+
+
+def keep_display_on() -> None:
+    """Asks Windows to keep the display on and the PC awake while this process runs, as a video
+    player does; it changes no setting. Input does not reach a switched-off or locked screen."""
+    ES_CONTINUOUS, ES_SYSTEM_REQUIRED, ES_DISPLAY_REQUIRED = 0x80000000, 0x1, 0x2
+    request = kernel32.SetThreadExecutionState
+    request.argtypes, request.restype = (wintypes.DWORD,), wintypes.DWORD
+    if not request(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED):
+        raise BackendError("Windows refused to keep the display on")
 
 
 def make_dpi_aware() -> None:
@@ -259,6 +276,10 @@ def class_name(hwnd: int) -> str:
     name = ctypes.create_unicode_buffer(256)
     user32.GetClassNameW(hwnd, name, 256)
     return name.value
+
+
+def is_visible(hwnd: int) -> bool:
+    return bool(user32.IsWindowVisible(hwnd))
 
 
 def is_multiline(hwnd: int) -> bool:
@@ -352,6 +373,23 @@ def click_at(x: int, y: int, count: int) -> None:
         time.sleep(CLICK_PAUSE_SECONDS)
 
 
+def minimize_own_console() -> None:
+    """Minimizes the terminal this bot runs in, so it cannot cover Fakturama. Windows Terminal
+    owns the console's pseudo window: its root owner is the window a person sees."""
+    kernel32.GetConsoleWindow.restype = wintypes.HWND
+    console = kernel32.GetConsoleWindow()
+    if not console:
+        return
+    for hwnd in {console, user32.GetAncestor(console, GA_ROOTOWNER)} - {None, 0}:
+        user32.ShowWindow(hwnd, SW_MINIMIZE)
+
+
+def wake_display() -> None:
+    """Turns a switched-off display back on with a pointer move of zero: nothing moves, nothing
+    is clicked. Keeping it on is not enough once it is off."""
+    _send(_mouse(MOUSEEVENTF_MOVE))
+
+
 def _key(vk: int = 0, *, scan: int = 0, flags: int = 0) -> INPUT:
     return INPUT(type=INPUT_KEYBOARD, u=_INPUTUNION(ki=KEYBDINPUT(wVk=vk, wScan=scan, dwFlags=flags)))
 
@@ -428,14 +466,31 @@ def _clipboard() -> Iterator[None]:
 
 
 def _owner() -> int:
-    """A hidden message-only window to own the clipboard: with no owner, SetClipboardData can fail."""
+    """A hidden message-only window to own the clipboard: with no owner, SetClipboardData can fail.
+    It lives on its own thread, which answers its messages at once: whoever empties the clipboard
+    next (Fakturama copying, Parallels syncing) waits for the owner's reply while holding the
+    clipboard open, so an owner that never answered would leave the clipboard locked."""
     global _clipboard_owner
     if _clipboard_owner is None:
-        hwnd = user32.CreateWindowExW(0, "STATIC", None, 0, 0, 0, 0, 0, HWND_MESSAGE, None, None, None)
-        if not hwnd:
-            raise BackendError(f"could not create the clipboard window (error {ctypes.get_last_error()})")
-        _clipboard_owner = int(hwnd)
+        ready: list[int] = []
+        created = threading.Event()
+        threading.Thread(target=_run_owner, args=(ready, created), name="clipboard-owner", daemon=True).start()
+        if not created.wait(5) or not ready[0]:
+            raise BackendError(f"could not create the clipboard window (error {ready[1] if len(ready) > 1 else 'timeout'})")
+        _clipboard_owner = ready[0]
     return _clipboard_owner
+
+
+def _run_owner(ready: list[int], created: threading.Event) -> None:
+    hwnd = user32.CreateWindowExW(0, "STATIC", None, 0, 0, 0, 0, 0, HWND_MESSAGE, None, None, None)
+    ready.extend((int(hwnd or 0), ctypes.get_last_error()))
+    created.set()
+    if not hwnd:
+        return
+    message = wintypes.MSG()
+    while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+        user32.TranslateMessage(ctypes.byref(message))
+        user32.DispatchMessageW(ctypes.byref(message))
 
 
 def _read_global(handle: int) -> bytes | None:

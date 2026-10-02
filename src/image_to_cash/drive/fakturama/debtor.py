@@ -13,7 +13,8 @@ from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, has_ro
 from image_to_cash.drive.fakturama.master_data import ensure_payment_method
 from image_to_cash.drive.fakturama.order import OrderEditor
 from image_to_cash.drive.fakturama.rules import address_lines_match, decide_debtor
-from image_to_cash.drive.locate import by_help, by_title, right_of_label
+from image_to_cash.drive.fakturama import controls as find
+from image_to_cash.drive.locate import by_title, right_of_label
 from image_to_cash.drive.report import Outcome
 from image_to_cash.drive.waits import wait_until
 from image_to_cash.errors import NeedsReview
@@ -29,7 +30,7 @@ EXTRA_ADDRESS_TAB = "additional address #1"
 def select_debtor(ctx: Context, order: OrderEditor, debtor: Debtor) -> bool:
     """Brief §2.1-2.4 and §2.12-2.13. True when the Order now holds this Debtor's addresses."""
     order.activate()
-    ctx.ui.click(by_help(order.scan(), Role.IMAGE, "Pick an address from the list"))
+    ctx.ui.click(find.address_picker(order.scan()))
     dialog = ctx.wb.wait_dialog(SELECTOR)
     controls = ctx.ui.tree(dialog)
     search = right_of_label(controls, "Search:")
@@ -65,7 +66,7 @@ def _pick_row(ctx: Context, controls: tuple[Element, ...], debtor: Debtor) -> bo
 
 
 def _selector_grid(controls: tuple[Element, ...]) -> Element:
-    grids = sorted((e for e in controls if e.role is Role.OTHER and e.rect.height > 200), key=lambda e: e.rect.width)
+    grids = sorted((e for e in controls if e.role is Role.OTHER and e.rect.height > 200), key=lambda e: (e.rect.width, e.rect.height))  # the innermost: a grid sits below its search row
     if not grids:
         raise NeedsReview("grid_not_found", {"grid": SELECTOR})
     return grids[0]
@@ -92,7 +93,7 @@ def create_debtor(ctx: Context, debtor: Debtor, method: PaymentMethod) -> None:
     same = not debtor.delivery_differs
     _fill_address(ctx, debtor, debtor.billing_address, roles=(INVOICE_ROLE, DELIVERY_ROLE) if same else (INVOICE_ROLE,), main=True)
     if not same:
-        ctx.ui.press(by_help(ctx.ui.scan(ctx.wb.editor_area()), Role.BUTTON, "add a new address"))
+        ctx.ui.press(find.add_address_button(ctx.ui.scan(ctx.wb.editor_area())))
         _open_tab(ctx, EXTRA_ADDRESS_TAB)
         _fill_address(ctx, debtor, debtor.delivery_address, roles=(DELIVERY_ROLE,), main=False)
     ctx.wb.shot("debtor-addresses")

@@ -50,3 +50,18 @@ def test_tab_folders_inside_an_editor_are_not_the_main_folders():
     bench = Workbench(Screen((EDITORS, ADDRESSES, VIEWS)), Path("unused"))
     assert bench.editor_area() == Rect(203, 63 + 26, 797, 297 - 26)
     assert bench.view_area() == Rect(203, 359 + 26, 797, 236 - 26)
+
+
+def test_an_editor_folder_reaching_past_the_visible_editor_is_still_inner():
+    # Windows: a Debtor's Addresses folder scrolls on below the editor area.
+    reaching = Element(Role.TAB_GROUP, Rect(260, 200, 600, 400))
+    bench = Workbench(Screen((EDITORS, reaching, VIEWS)), Path("unused"))
+    assert bench.editor_area() == Rect(203, 63 + 26, 797, 297 - 26)
+
+
+def test_a_selector_grid_is_the_pane_below_its_search_row():
+    from image_to_cash.drive.fakturama.debtor import _selector_grid
+
+    outer = Element(Role.OTHER, Rect(362, 56, 780, 466))
+    grid = Element(Role.OTHER, Rect(362, 90, 780, 432))
+    assert _selector_grid((Element(Role.OTHER, Rect(362, 56, 787, 515)), outer, grid)) is grid

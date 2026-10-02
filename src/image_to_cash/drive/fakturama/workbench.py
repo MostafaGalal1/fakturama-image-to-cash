@@ -43,9 +43,10 @@ class Workbench:
 
     def _folders(self) -> tuple[Rect, Rect]:
         """The editor folder on top and the list views below. Tab folders inside an editor (a
-        Debtor's "Addresses") are left out: they lie within one of these two."""
+        Debtor's "Addresses") are left out: they start within one of these two, right of its
+        left edge, and may reach past it (scrolled below the visible editor)."""
         found = [e.rect for e in self.ui.tree(self.main_window()) if e.role is Role.TAB_GROUP]
-        groups = [rect for rect in found if not any(other != rect and other.contains(rect) for other in found)]
+        groups = [rect for rect in found if not any(_inner(rect, other) for other in found)]
         if len(groups) != 2:
             raise NeedsReview("fakturama_layout", {"tab_folders": str(len(groups))})
         top, bottom = sorted(groups, key=lambda rect: rect.y)
@@ -176,6 +177,10 @@ class Workbench:
     def shot(self, name: str) -> Path:
         self._shot_count += 1
         return self.ui.capture(self.main_window().rect, self._shots / f"{self._shot_count:02d}-{name}.png")
+
+
+def _inner(rect: Rect, outer: Rect) -> bool:
+    return rect != outer and (outer.contains(rect) or (outer.holds(rect.x, rect.y) and rect.x > outer.x))
 
 
 def _selected(tab: Element) -> bool:

@@ -55,6 +55,7 @@ class WindowsUiaBackend:
     layout = WINDOWS_LAYOUT
 
     def __init__(self, pid: int, main_hwnd: int) -> None:
+        win32.keep_display_on()
         self._pid = pid
         self._main_hwnd = main_hwnd
         self._scale = Scale.from_dpi(win32.window_dpi(main_hwnd))
@@ -69,6 +70,8 @@ class WindowsUiaBackend:
 
     def bring_to_front(self) -> None:
         """Called once, at the start of a run; afterwards losing the front stops the run."""
+        win32.wake_display()
+        win32.minimize_own_console()
         win32.bring_to_front(self._main_hwnd)
         wait_until_frontmost(self._pid, win32.foreground_pid, sleep=time.sleep)
         self._guard()
@@ -325,7 +328,7 @@ class WindowsUiaBackend:
         return items
 
     def _walk(self, handle: object, depth: int, found: list[Element], area: Rect | None) -> None:
-        if handle is None or _safe(lambda: handle.IsOffscreen):
+        if handle is None or _hidden(handle):
             return
         try:
             rect = self._rect(handle)
@@ -346,7 +349,7 @@ class WindowsUiaBackend:
             rect=rect or self._rect(handle),
             name=_safe(lambda: handle.Name),
             value=self._value(handle, native),
-            help=_help(handle),
+            help=_help(handle) or (_safe(lambda: handle.Name) if _in_toolbar(handle) else None),
             enabled=bool(_safe(lambda: handle.IsEnabled)),
             multiline=native == "Edit" and _multiline(handle),
             editable=native == "ComboBox" and any(_native(c) == "Edit" for c in _safe(handle.GetChildren) or ()),
@@ -367,10 +370,13 @@ class WindowsUiaBackend:
         return value
 
     def _rect(self, handle: object) -> Rect:
-        frame = _safe(lambda: handle.BoundingRectangle)
-        if frame is None or frame.right <= frame.left or frame.bottom <= frame.top:
+        frame = _frame(handle)
+        if frame is None:
             raise BackendError("element has no frame (it may have closed)")
-        return self._points(frame.left, frame.top, frame.right, frame.bottom)
+        if not _safe(lambda: handle.NativeWindowHandle):  # windowless: SWT may report it in points
+            parent = _frame(_safe(handle.GetParentControl))
+            frame = frame if parent is None else self._scale.child_frame(frame, parent)
+        return self._points(*frame)
 
     def _points(self, left: float, top: float, right: float, bottom: float) -> Rect:
         return self._scale.to_points(left, top, right, bottom)
@@ -408,6 +414,28 @@ def _safe(read: Callable[[], object]) -> object | None:
         return read()
     except Exception:  # comtypes' COMError and friends: the answer is "not available"
         return None
+
+
+def _frame(handle: object | None) -> tuple[float, float, float, float] | None:
+    frame = None if handle is None else _safe(lambda: handle.BoundingRectangle)
+    if frame is None or frame.right <= frame.left or frame.bottom <= frame.top:
+        return None
+    return frame.left, frame.top, frame.right, frame.bottom
+
+
+def _hidden(handle: object) -> bool:
+    """A control in a hidden window (an unselected tab's page). Not IsOffscreen: SWT's tab folders
+    claim to be offscreen while shown."""
+    hwnd = _safe(lambda: handle.NativeWindowHandle)
+    return bool(hwnd) and not win32.is_visible(hwnd)
+
+
+def _in_toolbar(handle: object) -> bool:
+    """A toolbar button, whose UI Automation name is its tooltip."""
+    if _native(handle) not in ("Button", "SplitButton") or _safe(lambda: handle.NativeWindowHandle):
+        return False
+    parent = _safe(handle.GetParentControl)
+    return parent is not None and _safe(lambda: parent.ClassName) == "ToolbarWindow32"
 
 
 def _native(handle: object) -> str:

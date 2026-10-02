@@ -13,15 +13,14 @@ from image_to_cash.drive.fakturama.fields import set_date, shown
 from image_to_cash.drive.fakturama.grids import column_centres, copy_all, copy_line, edit_cell, grid_at
 from image_to_cash.drive.fakturama.rules import check_line
 from image_to_cash.drive.formats import GERMAN, format_amount, parse_amount
-from image_to_cash.drive.locate import by_help, by_title, label, right_of_label
+from image_to_cash.drive.fakturama import controls as find
+from image_to_cash.drive.locate import by_title, label, right_of_label
 from image_to_cash.drive.report import Outcome
 from image_to_cash.errors import NeedsReview
 from image_to_cash.model import Totals
 from image_to_cash.normalized import NormalizedOrder, OrderLine
 
 NEW_ORDER = "New Order"
-PRICE_MODE_HELP = "Specify whether the prices"
-VAT_MODE_HELP = "If this document is set to a tax rate"
 QTY, UNIT_PRICE, DISCOUNT = "Qty.", "U.Price", "Discount"
 GRID_DX = 250  # from the "Items" label into the grid
 
@@ -41,7 +40,7 @@ class DocumentEditor:
         return self.ctx.ui.scan(self.ctx.wb.editor_area())
 
     def number(self) -> str:
-        return shown(self.ctx.ui, by_help(self.scan(), Role.TEXT_FIELD, "Reference number of this document"))
+        return shown(self.ctx.ui, find.document_number(self.scan()))
 
     def address_texts(self) -> tuple[str, str]:
         """The Invoice address and Delivery address blocks, each on its own tab."""
@@ -57,7 +56,7 @@ class DocumentEditor:
         return invoice, delivery
 
     def _address_block(self, controls: tuple[Element, ...]) -> Element:
-        picker = by_help(controls, Role.IMAGE, "Pick an address from the list")
+        picker = find.address_picker(controls)
         blocks = [e for e in controls if e.role is Role.TEXT_AREA and abs(e.rect.y - picker.rect.y) <= 4]
         if len(blocks) != 1:
             raise NeedsReview("control_not_found", {"control": "address block"})
@@ -132,13 +131,13 @@ class OrderEditor(DocumentEditor):
         ctx.wb.wait_for_editor_tab(lambda title: title.lstrip("*") == NEW_ORDER, NEW_ORDER)
         editor = cls(ctx, NEW_ORDER)
         controls = ctx.wb.scan_editor(lambda found: right_of_label(found, "Cust.Ref."), "the New Order editor")
-        number = shown(ctx.ui, by_help(controls, Role.TEXT_FIELD, "Reference number of this document"))
+        number = shown(ctx.ui, find.document_number(controls))
         if not number:
             raise NeedsReview("order_number_missing")
         set_date(ctx.ui, right_of_label(controls, "Date"), order.order_date, label="order_date")
         set_text(ctx.ui, right_of_label(controls, "Cust.Ref."), order.external_reference, label="cust_ref")
-        ctx.ui.choose(by_help(controls, Role.POPUP, PRICE_MODE_HELP), "Net")
-        if shown(ctx.ui, by_help(controls, Role.POPUP, VAT_MODE_HELP)) != "With VAT":
+        ctx.ui.choose(find.price_mode(controls), "Net")
+        if shown(ctx.ui, find.vat_mode(controls)) != "With VAT":
             raise NeedsReview("vat_mode_not_with_vat")
         ctx.record("order_opened", Outcome.DONE, number=number)
         ctx.wb.shot("order-header")
@@ -170,7 +169,7 @@ class InvoiceEditor(DocumentEditor):
     def payment_row(self) -> tuple[tuple[Element, ...], Element]:
         """The controls on the 'paid' row (payment method, date, value) and the checkbox."""
         controls = self.scan()
-        paid = by_help(controls, Role.CHECKBOX, "Check this, if the invoice is paid")
+        paid = find.paid_box(controls)
         row = Rect(self.ctx.wb.editor_area().x, paid.rect.y - 8, 700, paid.rect.height + 16)
         return tuple(e for e in controls if row.contains(e.rect)), paid
 

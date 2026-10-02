@@ -29,6 +29,21 @@ class Scale:
     def to_pixels(self, x: float, y: float) -> tuple[int, int]:
         return round(x * self.factor), round(y * self.factor)
 
+    def child_frame(self, child: Frame, parent: Frame) -> Frame:
+        """A windowless child's frame in pixels. SWT reports some (a tab folder's tabs) in points
+        when the screen is scaled: such a frame fits its parent only once scaled."""
+        if _inside(child, parent):
+            return child
+        scaled = tuple(round(value * self.factor) for value in child)
+        return scaled if _inside(scaled, parent) else child
+
+
+Frame = tuple[float, float, float, float]  # left, top, right, bottom
+
+
+def _inside(child: Frame, parent: Frame) -> bool:
+    return parent[0] <= child[0] and parent[1] <= child[1] and child[2] <= parent[2] and child[3] <= parent[3]
+
 
 def menu_label(raw: str) -> str:
     """A Win32 menu item's text as a person reads it: "&Close All\\tCtrl+Shift+W" -> "Close All"."""

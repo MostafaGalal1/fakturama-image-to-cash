@@ -35,16 +35,17 @@ MAC_LAYOUT = Layout(
     grid_roles=frozenset({"AXScrollArea"}),
 )
 
-# First values for Windows, not yet measured on a live Fakturama: NatTable's default row is 20 px,
-# SWT tab rows are a little taller than on macOS, and the whole left panel is scanned for the "New"
-# links (UI Automation lists every control, so a large area costs little). Calibrate them with
-# tests/test_windows_uia_contract.py; a wrong value stops the run, because every grid selection
-# is copied back and compared.
+# Measured on Fakturama 2.2, Windows 11 at 200 % (tests/test_windows_uia_contract.py prints them):
+# the grid header is 19.5 points and each row 20, tabs take the first 23 points of a folder, and
+# the left panel starts 114.5 points below the main window's corner (below the toolbar). The
+# whole left panel is scanned for its links: UI Automation lists every control, so a large area
+# costs little. The row header is not measured yet (an empty grid draws none); a wrong value
+# stops the run, because every grid selection is copied back and compared.
 WINDOWS_LAYOUT = Layout(
     header_height=20,
     row_height=20,
     row_header_dx=12,
-    tab_strip=28,
-    nav_area=Rect(0, 0, 330, 4000),
+    tab_strip=23,
+    nav_area=Rect(0, 110, 330, 4000),
     grid_roles=frozenset({"Pane"}),
 )

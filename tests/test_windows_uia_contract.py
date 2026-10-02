@@ -2,7 +2,7 @@
 
 The Windows twin of test_macos_ax_contract.py. It brings Fakturama to the front, clicks and types,
 so nobody may use the PC (or the VM's window) while it runs. It saves nothing: each editor it opens
-is closed with every "Save Parts" box unticked.
+is closed on its own, answering No to "Save changes?".
 
 `test_print_calibration` prints what the flow assumes about Fakturama's layout (tab folders, the
 main toolbar's tooltips, the list rows): run it with `-s` and compare with WINDOWS_LAYOUT.
@@ -59,20 +59,21 @@ def open_vat_editor(backend, workbench):
 
 
 def close_all_without_saving(backend):
-    backend.press_menu(("File", "Close All"))
+    """Closes one editor at a time and answers No to "Save changes?". Never "Close All": its
+    "Save Parts" list hides on Windows which parts are ticked, so its OK could save them."""
+    workbench = Workbench(backend, None)
     for _ in range(10):
-        time.sleep(1.0)
-        dialogs = [w for w in backend.windows() if w.title == "Save Parts"]
-        if not dialogs:
+        if not workbench.editor_tabs():
             return
-        elements = backend.tree(dialogs[0])
-        boxes = [e for e in elements if e.role is Role.CHECKBOX]
-        for box in boxes:
-            if backend.refresh(box).value == "1":
-                backend.press(box)
-        assert all(backend.refresh(box).value == "0" for box in boxes), "a part is still ticked: not pressing OK"
-        backend.press(by_title(elements, Role.BUTTON, "OK"))
-    pytest.fail("Save Parts dialogs kept appearing")
+        backend.press_menu(("File", "Close"))
+        time.sleep(1.0)
+        for dialog in (w for w in backend.windows() if not w.title.startswith("Fakturama - ")):
+            buttons = [e for e in backend.tree(dialog) if e.role is Role.BUTTON]
+            assert any(b.title == "No" for b in buttons), f"unexpected dialog {dialog.title!r}: not answering it"
+            backend.bring_to_front()
+            backend.press(by_title(buttons, Role.BUTTON, "No"))
+            time.sleep(1.0)
+    pytest.fail("editors kept open after ten closes")
 
 
 def test_main_window_is_listed(workbench):
@@ -87,7 +88,7 @@ def test_editor_and_list_folders_are_found(workbench):
 
 @pytest.mark.parametrize("tooltip", FLOW_TOOLTIPS)
 def test_main_toolbar_buttons_carry_their_tooltips(workbench, tooltip):
-    assert workbench.toolbar_button(tooltip).enabled
+    assert workbench.toolbar_button(tooltip).role is Role.BUTTON  # Save stays disabled until an editor changes
 
 
 def test_text_is_typed_and_read_back(backend, workbench):
