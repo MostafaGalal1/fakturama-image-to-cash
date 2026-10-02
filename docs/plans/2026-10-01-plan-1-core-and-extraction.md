@@ -2481,13 +2481,17 @@ def run_extract(order_image, sample_order_path, out_dir):
     )
 
 
-def test_extract_clean_writes_order(tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything):
+def test_extract_clean_writes_order(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything
+):
     use_ocr(ocr_seeing_everything)
     assert run_extract(order_image, sample_order_path, tmp_path) == cli.EXIT_OK
     assert (tmp_path / "order.json").is_file()
 
 
-def test_extract_unconfirmed_writes_review(tmp_path, order_image, sample_order_path, use_ocr, ocr_missing_first_sku):
+def test_extract_unconfirmed_writes_review(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_missing_first_sku
+):
     use_ocr(ocr_missing_first_sku)
     assert run_extract(order_image, sample_order_path, tmp_path) == cli.EXIT_REVIEW
     assert (tmp_path / "review.json").is_file()
@@ -2580,6 +2584,63 @@ def test_approve_refuses_order_json_as_a_draft_and_keeps_it(
     assert cli.main(["approve", str(tmp_path / "order.json"), "--out", str(tmp_path)]) == cli.EXIT_ERROR
     assert "Stage 2's input" in capsys.readouterr().err
     assert (tmp_path / "order.json").is_file()
+
+
+def test_help_lists_the_exit_codes(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    assert "3 needs review" in capsys.readouterr().out
+
+
+def test_exit_codes_are_the_documented_contract():
+    assert (cli.EXIT_OK, cli.EXIT_ERROR, cli.EXIT_REVIEW) == (0, 1, 3)
+
+
+def test_usage_error_exits_2():
+    with pytest.raises(SystemExit) as stop:
+        cli.main(["extract"])
+    assert stop.value.code == 2
+
+
+def test_review_message_names_the_next_step(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_missing_first_sku, capsys
+):
+    use_ocr(ocr_missing_first_sku)
+    run_extract(order_image, sample_order_path, tmp_path)
+    out = capsys.readouterr().out
+    assert "needs review: 1 unconfirmed field(s), 0 issue(s)" in out
+    assert f"image-to-cash approve {tmp_path / 'review.json'}" in out
+
+
+def test_approve_says_what_it_approved(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_missing_first_sku, capsys
+):
+    use_ocr(ocr_missing_first_sku)
+    run_extract(order_image, sample_order_path, tmp_path)
+    capsys.readouterr()
+    assert cli.main(["approve", str(tmp_path / "review.json"), "--out", str(tmp_path)]) == cli.EXIT_OK
+    approved = "approved WEB-2026-0714-A17: Northstar Office GmbH, 2 line(s), gross 678.30 EUR, PAID"
+    assert approved in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("draft_name", ["missing.json", "binary.json", "broken.json"])
+def test_unreadable_draft_leaves_no_earlier_order(
+    tmp_path, order_image, sample_order_path, use_ocr, ocr_seeing_everything, draft_name
+):
+    use_ocr(ocr_seeing_everything)
+    out = tmp_path / "out"
+    run_extract(order_image, sample_order_path, out)
+    (tmp_path / "binary.json").write_bytes(b"\x89PNG\xff")
+    (tmp_path / "broken.json").write_text("{oops")
+    assert cli.main(["approve", str(tmp_path / draft_name), "--out", str(out)]) != cli.EXIT_OK
+    assert not (out / "order.json").exists()
+
+
+def test_broken_json_draft_names_the_file(tmp_path, capsys):
+    draft = tmp_path / "review.json"
+    draft.write_text('{"draft_order": {},}')
+    assert cli.main(["approve", str(draft), "--out", str(tmp_path / "ok")]) == cli.EXIT_REVIEW
+    assert f"{draft} is not valid JSON" in capsys.readouterr().err
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -2596,10 +2657,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 
-from PIL import UnidentifiedImageError
 from pydantic import ValidationError
 
 from image_to_cash.errors import NeedsReview
@@ -2618,7 +2679,11 @@ EXIT_REVIEW = 3  # 2 is argparse's code for bad command-line usage
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="image-to-cash", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="image-to-cash",
+        description="Read an order image into order.json for Stage 2, or review.json for a person.",
+        epilog="exit codes: 0 order.json written, 1 error, 2 bad usage, 3 needs review",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     extract_cmd = commands.add_parser("extract", help="read an order image into order.json")
@@ -2646,7 +2711,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "extract":
             return _extract(args)
         return _approve(args)
-    except (ReaderError, OcrError, OSError, UnidentifiedImageError, ValueError) as error:
+    except (ReaderError, OcrError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_ERROR
 
@@ -2654,7 +2719,7 @@ def main(argv: list[str] | None = None) -> int:
 def _extract(args: argparse.Namespace) -> int:
     clear_results(args.out)  # a failed run must not leave an earlier order for Stage 2
     if not args.image.is_file():
-        raise FileNotFoundError(f"image not found: {args.image}")
+        raise FileNotFoundError(f"image not found or not a file: {args.image}")
     reader = build_reader(args.reader, fixture=args.fixture)
     result = extract(args.image, reader, build_ocr(args.ocr))
     target = write_result(result, args.out)
@@ -2663,6 +2728,8 @@ def _extract(args: argparse.Namespace) -> int:
             f"needs review: {len(result.mismatches)} unconfirmed field(s), "
             f"{len(result.issues)} issue(s); see {target}"
         )
+        print(f"  check every field of draft_order against {result.source_image}, correct it, then run:")
+        print(f"  image-to-cash approve {shlex.quote(str(target))} --out {shlex.quote(str(args.out))}")
         return EXIT_REVIEW
     print(f"order written to {target}")
     return EXIT_OK
@@ -2671,9 +2738,13 @@ def _extract(args: argparse.Namespace) -> int:
 def _approve(args: argparse.Namespace) -> int:
     if args.draft.resolve() == (args.out / ORDER_FILE).resolve():
         raise ValueError(f"{args.draft} is Stage 2's input, not a draft; approve review.json instead")
+    discard_order(args.out)  # any outcome but "approved" must leave no earlier order for Stage 2
     draft = args.draft.read_text(encoding="utf-8")
-    discard_order(args.out)  # a refused draft must not leave an earlier order for Stage 2
-    payload = json.loads(draft)
+    try:
+        payload = json.loads(draft)
+    except json.JSONDecodeError as error:
+        print(f"not approved: {args.draft} is not valid JSON: {error}", file=sys.stderr)
+        return EXIT_REVIEW
     candidate = payload.get("draft_order", payload) if isinstance(payload, dict) else payload
     try:
         order = Order.model_validate(candidate)
@@ -2691,6 +2762,11 @@ def _approve(args: argparse.Namespace) -> int:
         print(f"not approved: {review}", file=sys.stderr)
         return EXIT_REVIEW
     target = write_order(normalized, args.out)
+    print(
+        f"approved {normalized.external_reference}: {normalized.debtor.company}, "
+        f"{len(normalized.lines)} line(s), gross {normalized.totals.gross} {order.currency}, "
+        f"{normalized.payment.status.value}"
+    )
     print(f"order written to {target}")
     return EXIT_OK
 

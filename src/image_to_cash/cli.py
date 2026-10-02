@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 
-from PIL import UnidentifiedImageError
 from pydantic import ValidationError
 
 from image_to_cash.errors import NeedsReview
@@ -26,7 +26,11 @@ EXIT_REVIEW = 3  # 2 is argparse's code for bad command-line usage
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="image-to-cash", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="image-to-cash",
+        description="Read an order image into order.json for Stage 2, or review.json for a person.",
+        epilog="exit codes: 0 order.json written, 1 error, 2 bad usage, 3 needs review",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     extract_cmd = commands.add_parser("extract", help="read an order image into order.json")
@@ -54,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "extract":
             return _extract(args)
         return _approve(args)
-    except (ReaderError, OcrError, OSError, UnidentifiedImageError, ValueError) as error:
+    except (ReaderError, OcrError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_ERROR
 
@@ -62,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
 def _extract(args: argparse.Namespace) -> int:
     clear_results(args.out)  # a failed run must not leave an earlier order for Stage 2
     if not args.image.is_file():
-        raise FileNotFoundError(f"image not found: {args.image}")
+        raise FileNotFoundError(f"image not found or not a file: {args.image}")
     reader = build_reader(args.reader, fixture=args.fixture)
     result = extract(args.image, reader, build_ocr(args.ocr))
     target = write_result(result, args.out)
@@ -71,6 +75,8 @@ def _extract(args: argparse.Namespace) -> int:
             f"needs review: {len(result.mismatches)} unconfirmed field(s), "
             f"{len(result.issues)} issue(s); see {target}"
         )
+        print(f"  check every field of draft_order against {result.source_image}, correct it, then run:")
+        print(f"  image-to-cash approve {shlex.quote(str(target))} --out {shlex.quote(str(args.out))}")
         return EXIT_REVIEW
     print(f"order written to {target}")
     return EXIT_OK
@@ -79,9 +85,13 @@ def _extract(args: argparse.Namespace) -> int:
 def _approve(args: argparse.Namespace) -> int:
     if args.draft.resolve() == (args.out / ORDER_FILE).resolve():
         raise ValueError(f"{args.draft} is Stage 2's input, not a draft; approve review.json instead")
+    discard_order(args.out)  # any outcome but "approved" must leave no earlier order for Stage 2
     draft = args.draft.read_text(encoding="utf-8")
-    discard_order(args.out)  # a refused draft must not leave an earlier order for Stage 2
-    payload = json.loads(draft)
+    try:
+        payload = json.loads(draft)
+    except json.JSONDecodeError as error:
+        print(f"not approved: {args.draft} is not valid JSON: {error}", file=sys.stderr)
+        return EXIT_REVIEW
     candidate = payload.get("draft_order", payload) if isinstance(payload, dict) else payload
     try:
         order = Order.model_validate(candidate)
@@ -99,6 +109,11 @@ def _approve(args: argparse.Namespace) -> int:
         print(f"not approved: {review}", file=sys.stderr)
         return EXIT_REVIEW
     target = write_order(normalized, args.out)
+    print(
+        f"approved {normalized.external_reference}: {normalized.debtor.company}, "
+        f"{len(normalized.lines)} line(s), gross {normalized.totals.gross} {order.currency}, "
+        f"{normalized.payment.status.value}"
+    )
     print(f"order written to {target}")
     return EXIT_OK
 
