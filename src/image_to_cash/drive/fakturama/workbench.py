@@ -28,7 +28,13 @@ DIALOG_TIMEOUT = 10
 POLL = 0.5
 
 
+class FolderLayout(NeedsReview):
+    """Not the editor folder above the list folder. Fakturama shows this for a moment while it
+    opens an editor, so waits for an editor retry it; anywhere else it stops the run."""
+
+
 TOOLBAR_ROW = 10.0  # points: buttons of one toolbar row share their top
+COLUMN_SLACK = 2.0  # points: the editor and list folders share their left edge and width
 
 class Workbench:
     def __init__(self, backend: UiBackend, shots: Path) -> None:
@@ -45,13 +51,16 @@ class Workbench:
         return found[0]
 
     def _folders(self) -> tuple[Rect, Rect]:
-        """The editor folder on top and the list views below. Tab folders inside an editor (a
-        Debtor's "Addresses") are left out: they start within one of these two, right of its
-        left edge, and may reach past it (scrolled below the visible editor)."""
+        """The editor folder on top and the list views below, which share the widest column. Tab
+        folders inside an editor (a Debtor's "Addresses") are left out: they start within one of
+        these two, right of its left edge, and may reach past it (scrolled below the visible
+        editor). So is the Error log Fakturama opens beside the left panel after an internal error."""
         found = [e.rect for e in self.ui.tree(self.main_window()) if e.role is Role.TAB_GROUP]
-        groups = [rect for rect in found if not any(_inner(rect, other) for other in found)]
+        outer = [rect for rect in found if not any(_inner(rect, other) for other in found)]
+        widest = max(outer, key=lambda rect: rect.width, default=None)
+        groups = [rect for rect in outer if widest and _same_column(rect, widest)]
         if len(groups) != 2:
-            raise NeedsReview("fakturama_layout", {"tab_folders": str(len(groups))})
+            raise FolderLayout("fakturama_layout", {"tab_folders": str(len(groups))})
         top, bottom = sorted(groups, key=lambda rect: rect.y)
         return top, bottom
 
@@ -104,7 +113,7 @@ class Workbench:
             what=f"the {what} editor",
             timeout=timeout,
             poll=POLL,
-            ignoring=(LookupError,),
+            ignoring=(LookupError, FolderLayout),
         )
 
     def click_nav(self, text: str, opened: Callable[[], bool]) -> None:
@@ -136,7 +145,7 @@ class Workbench:
             ready(found)
             return found
 
-        return wait_until(attempt, what=what, timeout=OPEN_TIMEOUT, poll=POLL, ignoring=(LocatorError,))
+        return wait_until(attempt, what=what, timeout=OPEN_TIMEOUT, poll=POLL, ignoring=(LocatorError, FolderLayout))
 
     def save(self, what: str) -> None:
         """The toolbar Save, once; done when Save turns grey again. Eclipse saves the active part,
@@ -207,6 +216,10 @@ class Workbench:
 
 def _inner(rect: Rect, outer: Rect) -> bool:
     return rect != outer and (outer.contains(rect) or (outer.holds(rect.x, rect.y) and rect.x > outer.x))
+
+
+def _same_column(rect: Rect, other: Rect) -> bool:
+    return abs(rect.x - other.x) <= COLUMN_SLACK and abs(rect.width - other.width) <= COLUMN_SLACK
 
 
 def _selected(tab: Element) -> bool:

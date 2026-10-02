@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 from fake_backend import FakeBackend
@@ -52,6 +53,14 @@ def test_tab_folders_inside_an_editor_are_not_the_main_folders():
     assert bench.view_area() == Rect(203, 359 + 26, 797, 236 - 26)
 
 
+def test_the_error_log_beside_the_navigation_is_not_a_main_folder():
+    # Windows: after an internal error Fakturama opens its Error log view below the left panel.
+    error_log = Element(Role.TAB_GROUP, Rect(0, 500, 190, 135))
+    bench = Workbench(Screen((error_log, EDITORS, VIEWS)), Path("unused"))
+    assert bench.editor_area() == Rect(203, 63 + 26, 797, 297 - 26)
+    assert bench.view_area() == Rect(203, 359 + 26, 797, 236 - 26)
+
+
 def test_an_editor_folder_reaching_past_the_visible_editor_is_still_inner():
     # Windows: a Debtor's Addresses folder scrolls on below the editor area.
     reaching = Element(Role.TAB_GROUP, Rect(260, 200, 600, 400))
@@ -80,3 +89,41 @@ def test_too_little_text_keeps_the_layouts_rows():
     assert rows_from_text((9.0,), WINDOWS_LAYOUT) == Rows.assumed(WINDOWS_LAYOUT)
     assert rows_from_text((9.0, 31.0), WINDOWS_LAYOUT) == Rows(31.0, WINDOWS_LAYOUT.row_height)
     assert rows_from_text((9.0, 31.0, 131.0), WINDOWS_LAYOUT).pitch == WINDOWS_LAYOUT.row_height  # 100 apart: noise
+
+
+def test_text_below_the_rows_does_not_stretch_the_pitch():
+    """Live, Windows VM: the order grid's frame reaches into the totals beside it ("Total Net"),
+    whose line came 56 points below the second row. The median gap (38) put row 2 in the wrong place."""
+    from image_to_cash.drive.fakturama.grids import Rows, rows_from_text
+
+    centres = (9.8, 11.2, 29.8, 30.5, 31.2, 49.8, 50.5, 51.2, 105.5, 106.2, 107.0)
+    rows = rows_from_text(centres, WINDOWS_LAYOUT)
+    assert rows.pitch == pytest.approx(20.0, abs=0.5) and rows.first_dy == pytest.approx(30.5, abs=0.5)
+
+
+class Redrawing(Screen):
+    """Live, Windows VM: opening an editor from a list left only one main folder for a moment."""
+
+    def __init__(self):
+        super().__init__((VIEWS,))
+        self.polls = 0
+
+    def tree(self, window):
+        self.polls += 1
+        return self.groups if self.polls < 3 else (EDITORS, VIEWS)
+
+    def scan(self, area):
+        tab = Element(Role.RADIO, Rect(203, 63, 100, 20), title="PO000005", value="True")
+        return (tab,) if area.y == EDITORS.rect.y else ()
+
+
+def test_an_editor_folder_being_redrawn_is_waited_for():
+    bench = Workbench(Redrawing(), Path("unused"))
+    assert bench.wait_for_editor_tab(lambda title: title == "PO000005", "Order PO000005", timeout=5) == "PO000005"
+
+
+def test_a_lasting_odd_layout_still_stops():
+    from image_to_cash.errors import NeedsReview
+
+    with pytest.raises(NeedsReview, match="fakturama_layout"):
+        Workbench(Screen((VIEWS,)), Path("unused")).editor_area()
