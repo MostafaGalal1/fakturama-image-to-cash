@@ -77,3 +77,13 @@ def test_validation_summary_lists_a_few_problems_and_counts_the_rest():
     assert hidden > 0
     assert summary.count(";") == MAX_ISSUES_SHOWN - 1
     assert summary.endswith(f"(+{hidden} more)")
+
+
+def test_validation_summary_hides_the_names_of_unexpected_fields(sample_order):
+    recorded = sample_order.model_dump(mode="json")
+    customer = recorded["customer"] | {"Max SECRET-NAME, +49 170 1234567": 1}
+    with pytest.raises(ValidationError) as caught:
+        Order.model_validate(recorded | {"customer": customer})
+    summary = describe_validation_error(caught.value)
+    assert summary.startswith("customer.<unexpected field>: ")
+    assert "SECRET-NAME" not in summary

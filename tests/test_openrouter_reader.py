@@ -13,6 +13,7 @@ from image_to_cash.readers.openrouter import API_KEY_ENV, API_URL, DEFAULT_MODEL
 API_KEY = "sk-or-v1-test-key-not-real"
 MODEL = "vendor/vision-model"
 MAX_MESSAGE_LENGTH = 400
+ANTHROPIC_IMAGE_LIMIT = 5_000_000
 
 
 @pytest.fixture
@@ -48,6 +49,12 @@ def uploaded_image(request: httpx.Request) -> tuple[str, Image.Image]:
     return header, Image.open(io.BytesIO(base64.b64decode(encoded)))
 
 
+def reader_error(reader: OpenRouterReader, image: Image.Image) -> ReaderError:
+    with pytest.raises(ReaderError) as caught:
+        reader.read(image)
+    return caught.value
+
+
 def test_returns_the_order_the_model_transcribed(sample_order, prepared_image):
     reader = serve(json=reply_with(sample_order.model_dump_json()))
     assert reader.read(prepared_image) == sample_order
@@ -62,7 +69,9 @@ def test_request_carries_the_model_key_prompt_and_image(sample_order, prepared_i
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert body["model"] == MODEL
     assert body["temperature"] == 0
+    assert body["max_tokens"] == openrouter.MAX_OUTPUT_TOKENS
     assert body["response_format"] == {"type": "json_object"}
+    assert body["provider"] == {"data_collection": "deny"}
     system_prompt = body["messages"][0]["content"]
     assert "exactly as printed" in system_prompt
     assert '"external_reference"' in system_prompt
@@ -77,6 +86,11 @@ def test_accepts_json_inside_a_code_fence_or_other_words(sample_order, prepared_
     assert serve(json=reply_with(content)).read(prepared_image) == sample_order
 
 
+def test_braces_in_words_after_the_json_fail_closed(sample_order, prepared_image):
+    content = sample_order.model_dump_json() + " (see {note})"
+    assert "not a valid order" in str(reader_error(serve(json=reply_with(content)), prepared_image))
+
+
 def test_shrinks_a_large_image_for_upload_and_leaves_the_original_alone(sample_order):
     original = Image.new("RGB", (3000, 1500), "white")
     before = original.tobytes()
@@ -88,8 +102,8 @@ def test_shrinks_a_large_image_for_upload_and_leaves_the_original_alone(sample_o
     assert original.tobytes() == before
 
 
-def noise_image() -> Image.Image:
-    return Image.effect_noise((160, 160), 100).convert("RGB")
+def noise_image(mode: str = "RGB") -> Image.Image:
+    return Image.effect_noise((160, 160), 100).convert(mode)
 
 
 def png_size(image: Image.Image) -> int:
@@ -98,8 +112,9 @@ def png_size(image: Image.Image) -> int:
     return len(buffer.getvalue())
 
 
-def test_sends_jpeg_when_the_png_is_too_large(monkeypatch, sample_order):
-    image = noise_image()
+@pytest.mark.parametrize("mode", ["RGB", "RGBA", "P"])
+def test_sends_jpeg_when_the_png_is_too_large(monkeypatch, sample_order, mode):
+    image = noise_image(mode)
     monkeypatch.setattr(openrouter, "MAX_UPLOAD_BYTES", png_size(image) - 1)
     seen: list[httpx.Request] = []
     serve(seen, json=reply_with(sample_order.model_dump_json())).read(image)
@@ -115,86 +130,157 @@ def test_refuses_an_image_too_large_even_as_jpeg(monkeypatch):
     assert seen == []
 
 
+def test_upload_limit_fits_the_strictest_provider_once_base64_encoded():
+    assert openrouter.MAX_UPLOAD_BYTES * 4 / 3 < ANTHROPIC_IMAGE_LIMIT
+
+
 @pytest.mark.parametrize("value", [None, "", "   "])
 def test_needs_an_api_key(monkeypatch, value):
     if value is None:
         monkeypatch.delenv(API_KEY_ENV, raising=False)
     else:
         monkeypatch.setenv(API_KEY_ENV, value)
-    with pytest.raises(ReaderError, match=API_KEY_ENV):
+    with pytest.raises(ReaderError, match=f"{API_KEY_ENV} is not set"):
         OpenRouterReader.from_env(MODEL)
+
+
+@pytest.mark.parametrize("key", ["sk-or-v1-abc\ndef", "sk-or-v1-café", "sk-or v1-abc", "sk-or-v1-\x07"])
+def test_rejects_a_mangled_api_key_without_echoing_it(monkeypatch, key):
+    monkeypatch.setenv(API_KEY_ENV, key)
+    with pytest.raises(ReaderError, match="unexpected characters") as caught:
+        OpenRouterReader.from_env(MODEL)
+    assert "sk-or" not in str(caught.value)
 
 
 @pytest.mark.parametrize(
     ("status", "expected"),
-    [(401, "rejected the key"), (402, "no credit"), (429, "rate-limited"), (500, "HTTP 500"), (503, "HTTP 503")],
+    [
+        (401, "rejected the key"),
+        (402, "no credit"),
+        (404, "no-data-collection"),
+        (429, "rate-limited"),
+        (500, "HTTP 500"),
+        (503, "HTTP 503"),
+    ],
 )
 def test_http_errors_say_what_went_wrong_without_the_key(prepared_image, status, expected):
     payload = {"error": {"message": f"upstream said no to {API_KEY}", "code": status}}
-    with pytest.raises(ReaderError, match=expected) as caught:
-        serve(status=status, json=payload).read(prepared_image)
-    message = str(caught.value)
+    message = str(reader_error(serve(status=status, json=payload), prepared_image))
+    assert expected in message
     assert MODEL in message
-    assert "upstream said no" in message
+    assert "upstream said no to [redacted]" in message
     assert API_KEY not in message
 
 
-def test_http_error_without_a_json_body(prepared_image):
-    with pytest.raises(ReaderError, match="HTTP 502"):
-        serve(status=502, text="<html>Bad gateway</html>").read(prepared_image)
+def test_redirects_are_not_followed(prepared_image):
+    seen: list[httpx.Request] = []
+    reader = serve(seen, status=307, headers={"Location": "https://elsewhere.example/steal"})
+    assert "HTTP 307" in str(reader_error(reader, prepared_image))
+    assert len(seen) == 1
 
 
-def test_upstream_messages_are_cut_short(prepared_image):
-    payload = {"error": {"message": "x" * 5000}}
-    with pytest.raises(ReaderError) as caught:
-        serve(status=400, json=payload).read(prepared_image)
-    assert len(str(caught.value)) < MAX_MESSAGE_LENGTH
+@pytest.mark.parametrize("body", [b"<html>Bad gateway</html>", b"[" * 100_000], ids=["html", "deeply-nested"])
+def test_http_error_without_a_usable_json_body(prepared_image, body):
+    assert "HTTP 502" in str(reader_error(serve(status=502, content=body), prepared_image))
 
 
-def test_an_error_inside_a_200_reply_is_reported(prepared_image):
-    payload = {"error": {"message": "Upstream error from Nvidia: unsupported regex", "code": 502}}
-    with pytest.raises(ReaderError, match="Upstream error from Nvidia"):
-        serve(json=payload).read(prepared_image)
+def test_upstream_messages_are_capped(prepared_image):
+    cap = openrouter.MAX_UPSTREAM_MESSAGE
+    message = str(reader_error(serve(status=400, json={"error": {"message": "x" * 5000}}), prepared_image))
+    assert "x" * cap in message
+    assert "x" * (cap + 1) not in message
+
+
+def test_the_cap_never_leaves_part_of_the_key(prepared_image):
+    upstream = "x" * (openrouter.MAX_UPSTREAM_MESSAGE - 5) + API_KEY
+    message = str(reader_error(serve(status=400, json={"error": {"message": upstream}}), prepared_image))
+    assert "sk-or" not in message
+
+
+def test_upstream_messages_are_one_printable_line(prepared_image):
+    upstream = "bad\x1b[2J\x1b]0;title\x07\nerror: forged line"
+    message = str(reader_error(serve(status=400, json={"error": {"message": upstream}}), prepared_image))
+    assert "\x1b" not in message
+    assert "\x07" not in message
+    assert "\n" not in message
+
+
+def test_an_error_inside_a_200_reply_is_reported_without_the_key(prepared_image):
+    payload = {"error": {"message": f"Upstream error from Nvidia: bad key {API_KEY}", "code": 502}}
+    message = str(reader_error(serve(json=payload), prepared_image))
+    assert "Upstream error from Nvidia" in message
+    assert API_KEY not in message
+
+
+def test_an_error_attached_to_the_choice_is_reported(prepared_image):
+    payload = {"choices": [{"finish_reason": "error", "error": {"message": "provider blew up"}, "message": {}}]}
+    assert "failed: provider blew up" in str(reader_error(serve(json=payload), prepared_image))
 
 
 @pytest.mark.parametrize("payload", [{}, {"choices": []}, {"choices": ["text"]}, [], "text"])
 def test_a_reply_without_choices_is_rejected(prepared_image, payload):
-    with pytest.raises(ReaderError, match="no choices"):
-        serve(json=payload).read(prepared_image)
+    assert "no choices" in str(reader_error(serve(json=payload), prepared_image))
 
 
-def test_a_reply_that_is_not_json_is_rejected(prepared_image):
-    with pytest.raises(ReaderError, match="not JSON"):
-        serve(text="<html>maintenance</html>").read(prepared_image)
+@pytest.mark.parametrize("body", [b"<html>maintenance</html>", b"[" * 100_000], ids=["html", "deeply-nested"])
+def test_a_reply_that_is_not_json_is_rejected(prepared_image, body):
+    assert "not JSON" in str(reader_error(serve(content=body), prepared_image))
 
 
 def test_a_reply_cut_off_at_the_token_limit_is_rejected(sample_order, prepared_image):
     content = sample_order.model_dump_json()[:100]
-    with pytest.raises(ReaderError, match="cut off"):
-        serve(json=reply_with(content, finish_reason="length")).read(prepared_image)
+    assert "cut off" in str(reader_error(serve(json=reply_with(content, finish_reason="length")), prepared_image))
 
 
 @pytest.mark.parametrize("content", [None, "", "   ", 42])
 def test_an_empty_reply_is_rejected(prepared_image, content):
-    with pytest.raises(ReaderError, match="empty reply"):
-        serve(json=reply_with(content)).read(prepared_image)
+    assert "empty reply" in str(reader_error(serve(json=reply_with(content)), prepared_image))
+
+
+def test_a_message_that_is_not_an_object_counts_as_empty(prepared_image):
+    payload = {"choices": [{"finish_reason": "stop", "message": "text"}]}
+    assert "empty reply" in str(reader_error(serve(json=payload), prepared_image))
+
+
+def test_an_empty_reply_names_an_unusual_finish_reason(prepared_image):
+    reply = reply_with("", finish_reason="content_filter")
+    assert "(finish_reason: content_filter)" in str(reader_error(serve(json=reply), prepared_image))
 
 
 @pytest.mark.parametrize(
-    "content", ["Sorry, SECRET-VALUE is unreadable", '{"external_reference": "SECRET-VALUE"}', "[]"]
+    "content",
+    [
+        "Sorry, SECRET-VALUE is unreadable",
+        '{"external_reference": "SECRET-VALUE"}',
+        '{"SECRET-VALUE, +49 170 1234567": 1}',
+        "[]",
+    ],
 )
 def test_a_reply_that_is_not_a_valid_order_is_rejected_without_echoing_it(prepared_image, content):
-    with pytest.raises(ReaderError, match="not a valid order") as caught:
-        serve(json=reply_with(content)).read(prepared_image)
-    message = str(caught.value)
+    message = str(reader_error(serve(json=reply_with(content)), prepared_image))
+    assert "not a valid order" in message
     assert "SECRET-VALUE" not in message
     assert len(message) < MAX_MESSAGE_LENGTH
 
 
-@pytest.mark.parametrize("error", [httpx.ConnectError("name resolution failed"), httpx.ReadTimeout("")])
-def test_network_failures_become_reader_errors(prepared_image, error):
-    with pytest.raises(ReaderError, match="cannot reach OpenRouter"):
-        failing(error).read(prepared_image)
+def test_network_failures_become_reader_errors_without_the_key(prepared_image):
+    leaky = httpx.LocalProtocolError(f"Illegal header value b'Bearer {API_KEY}'")
+    error = reader_error(failing(leaky), prepared_image)
+    assert "cannot reach OpenRouter" in str(error)
+    assert API_KEY not in str(error)
+    assert error.__cause__ is None
+    assert error.__suppress_context__
+
+
+def test_connection_failures_say_so(prepared_image):
+    error = reader_error(failing(httpx.ConnectError("name resolution failed")), prepared_image)
+    assert "cannot reach OpenRouter: name resolution failed" in str(error)
+
+
+def test_a_timeout_warns_that_the_request_may_be_billed(prepared_image):
+    error = reader_error(failing(httpx.ReadTimeout("")), prepared_image)
+    assert "no reply from OpenRouter within" in str(error)
+    assert "may still be billed" in str(error)
 
 
 def test_build_reader_uses_the_default_model_and_the_key_from_the_environment(monkeypatch):

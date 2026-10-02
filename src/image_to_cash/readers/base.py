@@ -6,10 +6,12 @@ from typing import Protocol
 
 from PIL import Image
 from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 from image_to_cash.model import Order
 
 MAX_ISSUES_SHOWN = 5
+UNEXPECTED_FIELD = "<unexpected field>"
 
 
 class ReaderError(RuntimeError):
@@ -29,13 +31,17 @@ class ImageReader(Protocol):
 def describe_validation_error(error: ValidationError) -> str:
     """A one-line summary of the first few problems, without the offending values.
 
-    The values are left out because a reader's output can hold personal data.
+    The values are left out because a reader's output can hold personal data. So are the names of
+    unexpected fields, which a model's reply controls too.
     """
     issues = error.errors(include_url=False, include_context=False, include_input=False)
-    shown = "; ".join(f"{_location(issue['loc'])}: {issue['msg']}" for issue in issues[:MAX_ISSUES_SHOWN])
+    shown = "; ".join(f"{_location(issue)}: {issue['msg']}" for issue in issues[:MAX_ISSUES_SHOWN])
     hidden = len(issues) - MAX_ISSUES_SHOWN
     return f"{shown} (+{hidden} more)" if hidden > 0 else shown
 
 
-def _location(loc: tuple[str | int, ...]) -> str:
+def _location(issue: ErrorDetails) -> str:
+    loc = issue["loc"]
+    if issue["type"] == "extra_forbidden":
+        loc = (*loc[:-1], UNEXPECTED_FIELD)
     return ".".join(str(part) for part in loc) or "<document>"
