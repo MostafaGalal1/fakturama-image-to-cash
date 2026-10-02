@@ -1,0 +1,643 @@
+{
+ "editor": [
+  "New Debtor"
+ ],
+ "group_rect": [
+  315,
+  125,
+  1197,
+  443
+ ],
+ "elements": [
+  {
+   "role": "SWTComposite",
+   "subrole": null,
+   "title": "New Debtor",
+   "value": null,
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    318,
+    151,
+    1191,
+    414
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "CUST000001",
+   "help": "Next contact ID and the format can be set unter preferences/number range",
+   "enabled": "True",
+   "rect": [
+    454,
+    170,
+    206,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Category",
+   "help": "Choose a category like 'Customer', 'Customer Web Shop' or 'Supplier'",
+   "enabled": "True",
+   "rect": [
+    667,
+    170,
+    51,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": "Category",
+   "value": "",
+   "help": "Choose a category like 'Customer', 'Customer Web Shop' or 'Supplier'",
+   "enabled": "True",
+   "rect": [
+    726,
+    171,
+    759,
+    14
+   ]
+  },
+  {
+   "role": "AXButton",
+   "subrole": null,
+   "title": "Open",
+   "value": null,
+   "help": "Choose a category like 'Customer', 'Customer Web Shop' or 'Supplier'",
+   "enabled": "True",
+   "rect": [
+    1483,
+    171,
+    16,
+    14
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Customer ID",
+   "help": "Next contact ID and the format can be set unter preferences/number range",
+   "enabled": "True",
+   "rect": [
+    379,
+    172,
+    68,
+    16
+   ]
+  },
+  {
+   "role": "AXTextArea",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": null,
+   "rect": [
+    456,
+    198,
+    400,
+    40
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Company",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    395,
+    210,
+    52,
+    16
+   ]
+  },
+  {
+   "role": "AXPopUpButton",
+   "subrole": null,
+   "title": null,
+   "value": "---",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    457,
+    248,
+    96,
+    20
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Salutation",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    392,
+    249,
+    55,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    454,
+    274,
+    206,
+    21
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    665,
+    274,
+    206,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "First Name Last Name",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    329,
+    276,
+    118,
+    16
+   ]
+  },
+  {
+   "role": "AXRadioButton",
+   "subrole": null,
+   "title": "Addresses",
+   "value": "True",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    328,
+    301,
+    84,
+    17
+   ]
+  },
+  {
+   "role": "AXRadioButton",
+   "subrole": null,
+   "title": "Miscellaneous",
+   "value": "False",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    402,
+    301,
+    83,
+    17
+   ]
+  },
+  {
+   "role": "AXRadioButton",
+   "subrole": null,
+   "title": "Notice",
+   "value": "False",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    485,
+    301,
+    43,
+    17
+   ]
+  },
+  {
+   "role": "AXRadioButton",
+   "subrole": null,
+   "title": "Main address",
+   "value": "True",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    335,
+    332,
+    106,
+    28
+   ]
+  },
+  {
+   "role": "AXButton",
+   "subrole": null,
+   "title": "+",
+   "value": null,
+   "help": "add a new address for this contact",
+   "enabled": "True",
+   "rect": [
+    1450,
+    338,
+    33,
+    20
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "additional information on the address, e.g. branch name or similar",
+   "enabled": "True",
+   "rect": [
+    463,
+    367,
+    472,
+    21
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1030,
+    367,
+    456,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "additional name",
+   "help": "additional information on the address, e.g. branch name or similar",
+   "enabled": "True",
+   "rect": [
+    372,
+    369,
+    86,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "local consultant",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    940,
+    369,
+    85,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    463,
+    391,
+    472,
+    21
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1030,
+    391,
+    456,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Street",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    424,
+    393,
+    34,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "E-Mail",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    989,
+    393,
+    36,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    463,
+    415,
+    472,
+    21
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1030,
+    415,
+    456,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Address specification",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    343,
+    417,
+    115,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Telephone",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    968,
+    417,
+    57,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    463,
+    439,
+    472,
+    21
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1030,
+    439,
+    456,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "district",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    419,
+    441,
+    39,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "2nd phone",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    967,
+    441,
+    58,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    463,
+    463,
+    56,
+    21
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    524,
+    463,
+    411,
+    21
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1030,
+    463,
+    456,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "ZIP - City",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    406,
+    465,
+    52,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Telefax",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    985,
+    465,
+    40,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1030,
+    487,
+    456,
+    24
+   ]
+  },
+  {
+   "role": "AXPopUpButton",
+   "subrole": null,
+   "title": null,
+   "value": "Egypt",
+   "help": "Set also your home county. Under preferences/contacts you can set those country names that are not displayed on the address label.",
+   "enabled": "True",
+   "rect": [
+    466,
+    490,
+    466,
+    20
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Country",
+   "help": "Set also your home county. Under preferences/contacts you can set those country names that are not displayed on the address label.",
+   "enabled": "True",
+   "rect": [
+    414,
+    491,
+    44,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Mobile",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    987,
+    491,
+    38,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    463,
+    514,
+    458,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "address type",
+   "help": "type of contact address (invoice address, delivery address etc.)",
+   "enabled": "True",
+   "rect": [
+    387,
+    516,
+    71,
+    16
+   ]
+  }
+ ]
+}

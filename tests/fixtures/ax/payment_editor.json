@@ -1,0 +1,405 @@
+{
+ "editor": [
+  "New Term of Payment"
+ ],
+ "group_rect": [
+  315,
+  125,
+  1197,
+  443
+ ],
+ "elements": [
+  {
+   "role": "SWTComposite",
+   "subrole": null,
+   "title": "New Term of Payment",
+   "value": null,
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    318,
+    151,
+    1191,
+    414
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Payment",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    867,
+    155,
+    93,
+    31
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Name of the term of payment. This is also the identifier used by the shop system.",
+   "enabled": "True",
+   "rect": [
+    486,
+    189,
+    1019,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Name",
+   "help": "Name of the term of payment. This is also the identifier used by the shop system.",
+   "enabled": "True",
+   "rect": [
+    448,
+    191,
+    33,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Account",
+   "help": "Set an (bank) account. All invoices with this payment will be booked to that account. E.g. 'Bank', 'Cash', 'Credit Card'.",
+   "enabled": "True",
+   "rect": [
+    435,
+    213,
+    46,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": "Account",
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    487,
+    214,
+    1003,
+    14
+   ]
+  },
+  {
+   "role": "AXButton",
+   "subrole": null,
+   "title": "Open",
+   "value": null,
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1488,
+    214,
+    16,
+    14
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "The description is the text used in the documents",
+   "enabled": "True",
+   "rect": [
+    486,
+    232,
+    1019,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Description",
+   "help": "The description is the text used in the documents",
+   "enabled": "True",
+   "rect": [
+    418,
+    234,
+    63,
+    16
+   ]
+  },
+  {
+   "role": "AXPopUpButton",
+   "subrole": null,
+   "title": null,
+   "value": "Mutually defined ",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    489,
+    259,
+    1013,
+    20
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "!editorPaymentPaymentcode!",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    324,
+    260,
+    157,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "0%",
+   "help": "Cash discount value in percent",
+   "enabled": "True",
+   "rect": [
+    486,
+    283,
+    1019,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Cash discount",
+   "help": "Cash discount value in percent",
+   "enabled": "True",
+   "rect": [
+    404,
+    285,
+    77,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "0",
+   "help": "Within these days the reduced price can be paid",
+   "enabled": "True",
+   "rect": [
+    486,
+    307,
+    1019,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Discount Days",
+   "help": "Within these days the reduced price can be paid",
+   "enabled": "True",
+   "rect": [
+    403,
+    309,
+    78,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "0",
+   "help": "Within these days the unreduced price has to be paid",
+   "enabled": "True",
+   "rect": [
+    486,
+    331,
+    1019,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Net Days",
+   "help": "Within these days the unreduced price has to be paid",
+   "enabled": "True",
+   "rect": [
+    431,
+    333,
+    50,
+    16
+   ]
+  },
+  {
+   "role": "AXButton",
+   "subrole": null,
+   "title": "",
+   "value": null,
+   "help": "Placeholder",
+   "enabled": "True",
+   "rect": [
+    1468,
+    355,
+    37,
+    16
+   ]
+  },
+  {
+   "role": "AXTextArea",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Enter the text that appears in the document, if the invoice is not paid. Placeholders can be used.",
+   "enabled": null,
+   "rect": [
+    488,
+    357,
+    975,
+    52
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Text 'unpaid'",
+   "help": "Enter the text that appears in the document, if the invoice is not paid. Placeholders can be used.",
+   "enabled": "True",
+   "rect": [
+    411,
+    375,
+    70,
+    16
+   ]
+  },
+  {
+   "role": "AXButton",
+   "subrole": null,
+   "title": "",
+   "value": null,
+   "help": "Placeholder",
+   "enabled": "True",
+   "rect": [
+    1468,
+    414,
+    37,
+    16
+   ]
+  },
+  {
+   "role": "AXTextArea",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Enter the text that appears in the document, if the invoice has a deposit. Placeholders can be used.",
+   "enabled": null,
+   "rect": [
+    488,
+    416,
+    975,
+    52
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Text 'deposit'",
+   "help": "Enter the text that appears in the document, if the invoice has a deposit. Placeholders can be used.",
+   "enabled": "True",
+   "rect": [
+    408,
+    434,
+    73,
+    16
+   ]
+  },
+  {
+   "role": "AXButton",
+   "subrole": null,
+   "title": "",
+   "value": null,
+   "help": "Placeholder",
+   "enabled": "True",
+   "rect": [
+    1468,
+    473,
+    37,
+    16
+   ]
+  },
+  {
+   "role": "AXTextArea",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Enter the text that appears in the document, if the invoice is paid. Placeholders can be used.",
+   "enabled": null,
+   "rect": [
+    488,
+    475,
+    975,
+    52
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Text 'paid'",
+   "help": "Enter the text that appears in the document, if the invoice is paid. Placeholders can be used.",
+   "enabled": "True",
+   "rect": [
+    424,
+    493,
+    57,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Cash",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    486,
+    536,
+    206,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Standard",
+   "help": "Name of the payment method that is the standard",
+   "enabled": "True",
+   "rect": [
+    431,
+    538,
+    50,
+    16
+   ]
+  }
+ ]
+}

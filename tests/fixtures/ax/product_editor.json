@@ -1,0 +1,475 @@
+{
+ "editor": [
+  "New product"
+ ],
+ "group_rect": [
+  315,
+  125,
+  1197,
+  443
+ ],
+ "elements": [
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Description",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    333,
+    161,
+    68,
+    14
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Product Picture",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1027,
+    161,
+    90,
+    14
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    446,
+    188,
+    554,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Item Number",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    371,
+    190,
+    70,
+    16
+   ]
+  },
+  {
+   "role": "AXImage",
+   "subrole": null,
+   "title": null,
+   "value": null,
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    1159,
+    204,
+    202,
+    152
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Name of the product. This is used for the items in the document.",
+   "enabled": "True",
+   "rect": [
+    446,
+    212,
+    554,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Name",
+   "help": "Name of the product. This is used for the items in the document.",
+   "enabled": "True",
+   "rect": [
+    408,
+    214,
+    33,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Category",
+   "help": "You can set a category to classify the products. This is also the web shop category.",
+   "enabled": "True",
+   "rect": [
+    390,
+    236,
+    51,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": "Category",
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    447,
+    237,
+    538,
+    14
+   ]
+  },
+  {
+   "role": "AXButton",
+   "subrole": null,
+   "title": "Open",
+   "value": null,
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    983,
+    237,
+    16,
+    14
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    446,
+    255,
+    554,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "GTIN",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    412,
+    257,
+    29,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    446,
+    279,
+    554,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "supplier code",
+   "help": "the supplier's item number",
+   "enabled": "True",
+   "rect": [
+    367,
+    281,
+    74,
+    16
+   ]
+  },
+  {
+   "role": "AXTextArea",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": "Additional description. Can be used for the item. This can be selected in preferences/documents.",
+   "enabled": null,
+   "rect": [
+    448,
+    305,
+    549,
+    80
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Description",
+   "help": "Additional description. Can be used for the item. This can be selected in preferences/documents.",
+   "enabled": "True",
+   "rect": [
+    378,
+    337,
+    63,
+    16
+   ]
+  },
+  {
+   "role": "AXLink",
+   "subrole": "AXTextLink",
+   "title": "Select a Picture",
+   "value": null,
+   "help": null,
+   "enabled": null,
+   "rect": [
+    1179,
+    355,
+    83,
+    13
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "0,00 €",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    455,
+    390,
+    126,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Price (gross)",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    371,
+    392,
+    70,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "0,00 €",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    446,
+    414,
+    126,
+    21
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    636,
+    414,
+    126,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "cost price (net)",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    358,
+    416,
+    83,
+    16
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "allowance",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    577,
+    416,
+    54,
+    16
+   ]
+  },
+  {
+   "role": "AXPopUpButton",
+   "subrole": null,
+   "title": null,
+   "value": "Free of Tax",
+   "help": "Tax rate of the product",
+   "enabled": "True",
+   "rect": [
+    449,
+    441,
+    146,
+    20
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "VAT",
+   "help": "Tax rate of the product",
+   "enabled": "True",
+   "rect": [
+    418,
+    442,
+    23,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "0.00",
+   "help": "the stock value which is available",
+   "enabled": "True",
+   "rect": [
+    446,
+    465,
+    554,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "Stock",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    409,
+    467,
+    32,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    446,
+    489,
+    554,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "user defined field 1",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    338,
+    491,
+    103,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    446,
+    513,
+    554,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "user defined field 2",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    337,
+    515,
+    104,
+    16
+   ]
+  },
+  {
+   "role": "AXTextField",
+   "subrole": null,
+   "title": null,
+   "value": "",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    446,
+    537,
+    554,
+    21
+   ]
+  },
+  {
+   "role": "AXStaticText",
+   "subrole": null,
+   "title": null,
+   "value": "user defined field 3",
+   "help": null,
+   "enabled": "True",
+   "rect": [
+    337,
+    539,
+    104,
+    16
+   ]
+  }
+ ]
+}

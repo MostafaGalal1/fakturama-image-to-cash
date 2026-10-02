@@ -29,6 +29,9 @@ saving. The database log shows only Fakturama's own bookkeeping: its version, an
 | Outlines (Preferences page list) | Setting the outline's `AXSelectedRows` to one row switches the page. No mouse event is needed. |
 | Grids (NatTable) | `AXScrollArea` with no children. **But Cmd+C copies the selected rows to the clipboard, tab-separated.** List views give clean values, e.g. `true	Tax-free	Free of Tax	0.0`. The order's items grid gives some cells as Java `toString()` dumps, e.g. VAT. Cmd+A then Cmd+C selects and copies all. So grids are read through the clipboard (saved and restored around the copy), with OCR on the grid frame as the fallback. |
 | Closing editors | Cmd+W did nothing (focus). **File → Close All** asks with one "Save Parts" dialog per dirty editor. Untick, verify, then OK discards it. **OK with the box ticked saves.** |
+| "Save Parts" checkbox | `AXPress` toggles it but returns `kAXErrorActionUnsupported` (-25205), although the box lists `AXPress` among its actions. The adapter accepts that code only when the element advertises the action, and the caller confirms by reading the value back. The table lists each cell under its row and again under its column, so the tree is de-duplicated by role and frame. |
+| Hit-test scan cost | About 6–7 s for one editor (1197×416 pt at a 20×8 pt step). Scan once per screen, then refresh only the elements in use. |
+| Screenshots | A **screen-region** capture records whatever covers the region: one test capture recorded another app's window. Capture **Fakturama's own window** (`screencapture -l <window id>`), then crop. That records Fakturama's pixels even while it is covered. |
 
 ## Editors seen
 
@@ -47,6 +50,12 @@ saving. The database log shows only Fakturama's own bookkeeping: its version, an
   - Fields: Item Number, Name, Category, GTIN, Description and **Price (gross)**, which matches the `gross_price` Stage 1 already computes.
   - VAT pop-up (default `Free of Tax`), and Stock.
 - **Invoice:** a `paid` checkbox. Ticking it reveals "at" (the payment date) and "Value" (the paid amount). Next to it is the payment-method pop-up (only `Pay Cash`), Due Days and Pay Until.
+- **VAT (New → New VAT):** Name, Category, Description, VAT code (E-Invoice) pop-up (default `S (Standard rate)`), and Value (`0%`). The editor opens already marked dirty (`*New TAX Rate`).
+- **Term of payment (New → New Term of Payment):**
+  - Fields: Name, Account, Description, a payment-code pop-up (default "Mutually defined"), Cash discount, Discount Days and Net Days.
+  - Text areas for the unpaid, deposit and paid texts.
+- **Snapshots:** blank VAT, payment, product, debtor and order editors are recorded in
+  `tests/fixtures/ax/`. The locator tests run against them.
 
 ## Consequences for Plan 2
 
@@ -72,9 +81,66 @@ saving. The database log shows only Fakturama's own bookkeeping: its version, an
      formats the spike measured. It is not used.
 8. **A run needs the Mac to itself.** During the spike, one keystroke test ran while another app was in front, and its text went there.
 
-## Still open
+## Settled in the live walkthrough (2026-10-02)
 
-- Cmd+A copy across several rows. Only one-row grids were available: the database was empty.
-- The "Select the address" and product pickers with real rows: search, select, OK.
-- Saving: the first real save of a VAT, payment method, debtor, product, order and invoice belongs to the end-to-end run, against a restorable database copy.
-- Number entry under the `de/DE` currency locale: whether price fields expect `199,00` or accept `199.00`.
+Every brief step was performed once by hand-written scripts through `MacAxBackend` (each input
+guarded, each value read back), then the database was restored and the bot ran end to end.
+
+- **Grids.** Cmd+A then Cmd+C copies every row. The copy holds stored values: a VAT rate as a
+  fraction (`0.19`), a line discount as a negative fraction (`-0.1` for 10 %), prices as `EUR 250`,
+  the VAT cell as the Java object's `toString`, empty cells as `null`.
+  - **Copying an empty selection crashes the copy:** Fakturama shows "Internal Error"
+    (`NullPointerException ... copiedCells is null`). So a grid is only copied after OCR has seen
+    text in its first row, and any "Internal Error" stops the run once acknowledged.
+  - **A click carries modifiers left over from an earlier chord**, turning it into a Cmd-click that
+    toggles the selection. Mouse events now clear their flags.
+  - **Clicking an already-selected cell opens its editor.** Whole rows are selected by their row
+    header (order items), or by arrow keys in the selector dialogs; each leaves one row selected.
+  - Cell editing: click the cell, then press the value's first character with its real key code
+    (this opens the editor holding that character), type the rest, Return. Column positions come
+    from OCR of the header row.
+- **Selectors.** "Select the address" lists one row per billing address (No., First Name, Name,
+  Company, ZIP, City, address type). "Select a product" lists Item No., Name, Description, Stock,
+  gross Price and VAT.
+  - **The product selector accepts by itself** as soon as its filter leaves one row: typing `MA`
+    picked MAT-DESK-02 and closed. The bot pastes the whole SKU in one edit and then checks that
+    exactly one new line with exactly that SKU appeared.
+  - Its search field lies under the dialog's title bar, so a click lands on the title. The bot gives
+    it the focus through `AXFocused` instead.
+- **Numbers and dates.** Amounts are typed with a decimal comma (`297,50`). Stock and line quantity
+  and discount use `.`. Date fields edit one segment at a time: click the month segment and type
+  `MM`, `DD`, `YYYY`; each complete segment moves on by itself.
+- **Text areas** (Company, product Description) take Tab as a character, so they are left by
+  clicking the next field.
+- **Debtor editor.** The address type is set in a small window of two checkboxes ("Invoice
+  address", "Delivery address") opened by the ▶ at the end of the field. "+" adds
+  "additional address #1". The Miscellaneous tab holds Alias name, Payment (lists payment
+  descriptions), Discount and Net or Gross. Fakturama's address block on the Order leaves the
+  additional name out.
+- **Pop-ups** pad some titles ("Credit transfer "); options are compared without the spaces. The
+  payment-code label is untranslated (`!editorPaymentPaymentcode!`).
+- **A freshly opened editor can spend its first click on activating itself**; the click then
+  reports `FocusNotTaken` and `set_text` clicks again (nothing was typed).
+- **The left "New product" link did not react to clicks**; the toolbar's "Create a new product"
+  does the same and takes `AXPress`. "New Contact" works, sometimes on the second click.
+- **Order totals** are disabled text fields, read from their container's children.
+- **Saving** greys the toolbar Save and renames the tab (`PO000001`, `INV000001`, the debtor as
+  `Company, First Last`, a product by its name).
+- **Documents list** states: `COMMAND_ORDER_PENDING` shows as "open", `COMMAND_CHECKED` as "paid".
+- **Screenshots:** `screencapture -l` returns the whole main window for a modal dialog, so the
+  backend asks Quartz (`CGWindowListCreateImage`) for exactly one window's pixels.
+
+## Found by the end-to-end runs (2026-10-02)
+
+- **An open editor keeps the choices it loaded when it opened.** A payment method saved while the
+  New Debtor editor is open does not appear in that editor's Payment pop-up. The bot makes sure of
+  the payment method before it opens New Contact (and of the VAT before New Product).
+- **Pasting the text a search box already holds does not filter again**, so a list searched for
+  the same text after a save still shows the old rows. The bot empties the box first, and every
+  "is it saved?" search is repeated, after a pause, up to three times.
+- **Preferences live in the database.** Fakturama loads them from the database at start and writes
+  them to its `.prefs` file when it quits, so restoring an older database copy also restores its
+  currency locale.
+- **OCR alone missed rows in the VATs list**, so the bot thought VAT 19% was missing and created a
+  second one. A grid's first row now counts as present when its strip shows dark text or the blue
+  of a selected row, with OCR as the last resort.

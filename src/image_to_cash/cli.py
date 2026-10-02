@@ -1,4 +1,4 @@
-"""Command line: `image-to-cash extract IMAGE` and `image-to-cash approve DRAFT`."""
+"""Command line: `image-to-cash extract IMAGE`, `approve DRAFT` and `drive ORDER_JSON`."""
 
 from __future__ import annotations
 
@@ -53,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     approve_cmd.add_argument(
         "--out", type=Path, default=Path("out"), help="folder for order.json; an earlier one is removed first"
     )
+    drive_cmd = commands.add_parser("drive", help="enter an approved order.json into the running Fakturama")
+    drive_cmd.add_argument("order", type=Path, help="order.json written by extract or approve")
+    drive_cmd.add_argument("--out", type=Path, default=Path("out/drive"), help="folder for run.jsonl and screens/")
     return parser
 
 
@@ -61,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "extract":
             return _extract(args)
+        if args.command == "drive":
+            return _drive(args)
         return _approve(args)
     except (ReaderError, OcrError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -119,6 +124,26 @@ def _approve(args: argparse.Namespace) -> int:
         f"{normalized.payment.status.value}"
     )
     print(f"order written to {target}")
+    return EXIT_OK
+
+
+def _drive(args: argparse.Namespace) -> int:
+    """Imported here: the macOS adapter needs pyobjc and Accessibility access, extract does not."""
+    from image_to_cash.drive.backend.macos_ax import MacAxBackend
+    from image_to_cash.drive.flow import drive
+    from image_to_cash.drive.preflight import check_currency, load_order
+
+    order = load_order(args.order)
+    try:
+        check_currency()
+        result = drive(order, MacAxBackend.attach(), build_ocr("macos-vision"), args.out)
+    except NeedsReview as review:
+        print(f"stopped for review: {review}; see {args.out / 'run.jsonl'}", file=sys.stderr)
+        return EXIT_REVIEW
+    except RuntimeError as error:  # BackendError: the accessibility API refused or failed
+        print(f"error: {error}; see {args.out / 'run.jsonl'}", file=sys.stderr)
+        return EXIT_ERROR
+    print(f"order {result.order_number} and invoice {result.invoice_number} saved and verified; see {args.out}")
     return EXIT_OK
 
 
