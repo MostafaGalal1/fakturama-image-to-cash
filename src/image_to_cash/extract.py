@@ -17,6 +17,7 @@ from image_to_cash.reconcile import Mismatch, reconcile
 
 @dataclass(frozen=True)
 class ExtractionResult:
+    source_image: Path
     order: Order
     normalized: NormalizedOrder | None
     mismatches: tuple[Mismatch, ...]
@@ -28,6 +29,10 @@ class ExtractionResult:
 
 
 def extract(image_path: Path, reader: ImageReader, ocr: OcrEngine) -> ExtractionResult:
+    """Read, cross-check, validate and normalise one order image.
+
+    Raises ReaderError, OcrError, OSError (unreadable image) or ValueError (oversized image).
+    """
     prepared = upscale(load_image(image_path))
     order = reader.read(prepared.copy())  # a reader must not change what OCR sees
     text_boxes = ocr.recognize(for_ocr(prepared))
@@ -37,5 +42,5 @@ def extract(image_path: Path, reader: ImageReader, ocr: OcrEngine) -> Extraction
         normalized = normalize(order)
     except NeedsReview as review:
         review_issue = Issue(review.reason, str(review))
-        return ExtractionResult(order, None, mismatches, (*issues, review_issue))
-    return ExtractionResult(order, normalized, mismatches, issues)
+        return ExtractionResult(image_path, order, None, mismatches, (*issues, review_issue))
+    return ExtractionResult(image_path, order, normalized, mismatches, issues)

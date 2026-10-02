@@ -2145,10 +2145,55 @@ git commit -m "feat: add image-reader interface with fixture reader"
 `tests/test_extract.py`:
 ```python
 import json
+import os
+from decimal import Decimal
+
+import pytest
 
 from image_to_cash.extract import extract
+from image_to_cash.imaging import UPSCALE_FACTOR
+from image_to_cash.ocr import Box, TextBox
 from image_to_cash.outputs import write_result
 from image_to_cash.readers import FixtureReader
+from image_to_cash.reconcile import critical_fields
+
+
+class RecordingOcr:
+    """Sees exactly the given texts and keeps a copy of the image it was handed."""
+
+    def __init__(self, texts):
+        self._boxes = tuple(TextBox(text=text, box=Box(0, 0, 1, 1)) for text in texts)
+        self.seen = None
+
+    def recognize(self, image):
+        self.seen = image.copy()
+        return self._boxes
+
+
+class PaintingReader:
+    """Paints the image it is handed black, then replays the fixture."""
+
+    def __init__(self, fixture_path):
+        self._inner = FixtureReader(fixture_path)
+        self.seen_size = None
+
+    def read(self, image):
+        self.seen_size = image.size
+        image.paste((0, 0, 0), (0, 0, *image.size))
+        return self._inner.read(image)
+
+
+def expected_texts(order):
+    return tuple(expected for _, expected in critical_fields(order))
+
+
+def write_fixture(path, order):
+    path.write_text(order.model_dump_json(), encoding="utf-8")
+    return path
+
+
+def output_names(out_dir):
+    return sorted(path.name for path in out_dir.iterdir())
 
 
 def test_clean_extraction(sample_order_path, order_image, ocr_seeing_everything):
@@ -2166,11 +2211,32 @@ def test_unconfirmed_field_needs_review(sample_order_path, order_image, ocr_miss
 
 def test_normalisation_failure_needs_review(tmp_path, sample_order, order_image, ocr_seeing_everything):
     customer = sample_order.customer.model_copy(update={"contact_name": "Anna Maria Klein"})
-    fixture = tmp_path / "order.json"
-    fixture.write_text(sample_order.model_copy(update={"customer": customer}).model_dump_json())
+    fixture = write_fixture(tmp_path / "order.json", sample_order.model_copy(update={"customer": customer}))
     result = extract(order_image, FixtureReader(fixture), ocr_seeing_everything)
+    assert result.needs_review is True
     assert result.normalized is None
     assert "contact_name_ambiguous" in {issue.code for issue in result.issues}
+
+
+def test_arithmetic_issue_alone_needs_review(tmp_path, sample_order, order_image):
+    totals = sample_order.totals.model_copy(update={"gross": Decimal("679.30")})
+    tampered = sample_order.model_copy(update={"totals": totals})
+    fixture = write_fixture(tmp_path / "order.json", tampered)
+    result = extract(order_image, FixtureReader(fixture), RecordingOcr(expected_texts(tampered)))
+    assert result.mismatches == ()
+    target = write_result(result, tmp_path / "out")
+    assert target.name == "review.json"
+    assert [issue["code"] for issue in json.loads(target.read_text())["issues"]] == ["gross_total_mismatch"]
+
+
+def test_reader_gets_a_copy_and_ocr_gets_the_clean_greyscale_upscale(sample_order_path, sample_order, order_image):
+    reader = PaintingReader(sample_order_path)
+    ocr = RecordingOcr(expected_texts(sample_order))
+    extract(order_image, reader, ocr)
+    upscaled = (40 * UPSCALE_FACTOR, 60 * UPSCALE_FACTOR)
+    assert reader.seen_size == upscaled
+    assert (ocr.seen.mode, ocr.seen.size) == ("L", upscaled)
+    assert ocr.seen.getpixel((0, 0)) == 255, "the reader's paint must not reach OCR"
 
 
 def test_write_result_writes_order_json(tmp_path, sample_order_path, order_image, ocr_seeing_everything):
@@ -2185,8 +2251,51 @@ def test_write_result_writes_review_json(tmp_path, sample_order_path, order_imag
     target = write_result(result, tmp_path / "out")
     payload = json.loads(target.read_text())
     assert target.name == "review.json"
+    assert payload["reason"] == "1 field(s) not confirmed by OCR, 0 issue(s)"
+    assert payload["source_image"] == str(order_image)
     assert payload["mismatches"] == [{"field": "items[0].sku", "expected": "CHR-ERGO-01"}]
     assert payload["draft_order"]["external_reference"] == "WEB-2026-0714-A17"
+
+
+def test_review_json_keeps_non_ascii_readable(tmp_path, sample_order, order_image):
+    customer = sample_order.customer.model_copy(update={"company": "Müller & Söhne GmbH"})
+    fixture = write_fixture(tmp_path / "order.json", sample_order.model_copy(update={"customer": customer}))
+    target = write_result(extract(order_image, FixtureReader(fixture), RecordingOcr(())), tmp_path / "out")
+    assert "Müller & Söhne GmbH" in target.read_text(encoding="utf-8")
+
+
+def test_review_run_removes_an_earlier_order_json(
+    tmp_path, sample_order_path, order_image, ocr_seeing_everything, ocr_missing_first_sku
+):
+    out = tmp_path / "out"
+    write_result(extract(order_image, FixtureReader(sample_order_path), ocr_seeing_everything), out)
+    write_result(extract(order_image, FixtureReader(sample_order_path), ocr_missing_first_sku), out)
+    assert output_names(out) == ["review.json"]
+
+
+def test_clean_run_removes_an_earlier_review_json(
+    tmp_path, sample_order_path, order_image, ocr_seeing_everything, ocr_missing_first_sku
+):
+    out = tmp_path / "out"
+    write_result(extract(order_image, FixtureReader(sample_order_path), ocr_missing_first_sku), out)
+    write_result(extract(order_image, FixtureReader(sample_order_path), ocr_seeing_everything), out)
+    assert output_names(out) == ["order.json"]
+
+
+def test_failed_write_leaves_neither_file(
+    tmp_path, monkeypatch, sample_order_path, order_image, ocr_seeing_everything
+):
+    out = tmp_path / "out"
+    result = extract(order_image, FixtureReader(sample_order_path), ocr_seeing_everything)
+    write_result(result, out)
+
+    def disk_full(*_):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", disk_full)
+    with pytest.raises(OSError):
+        write_result(result, out)
+    assert output_names(out) == []
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -2216,6 +2325,7 @@ from image_to_cash.reconcile import Mismatch, reconcile
 
 @dataclass(frozen=True)
 class ExtractionResult:
+    source_image: Path
     order: Order
     normalized: NormalizedOrder | None
     mismatches: tuple[Mismatch, ...]
@@ -2227,6 +2337,10 @@ class ExtractionResult:
 
 
 def extract(image_path: Path, reader: ImageReader, ocr: OcrEngine) -> ExtractionResult:
+    """Read, cross-check, validate and normalise one order image.
+
+    Raises ReaderError, OcrError, OSError (unreadable image) or ValueError (oversized image).
+    """
     prepared = upscale(load_image(image_path))
     order = reader.read(prepared.copy())  # a reader must not change what OCR sees
     text_boxes = ocr.recognize(for_ocr(prepared))
@@ -2236,48 +2350,93 @@ def extract(image_path: Path, reader: ImageReader, ocr: OcrEngine) -> Extraction
         normalized = normalize(order)
     except NeedsReview as review:
         review_issue = Issue(review.reason, str(review))
-        return ExtractionResult(order, None, mismatches, (*issues, review_issue))
-    return ExtractionResult(order, normalized, mismatches, issues)
+        return ExtractionResult(image_path, order, None, mismatches, (*issues, review_issue))
+    return ExtractionResult(image_path, order, normalized, mismatches, issues)
 ```
 
 - [ ] **Step 4: Implement `src/image_to_cash/outputs.py`**
 
 ```python
-"""Persist Stage-1 results: order.json when clean, review.json when a person must check."""
+"""Persist Stage-1 results: order.json when clean, review.json when a person must check.
+
+The out dir only ever holds the latest run's complete result. Both files are removed before
+a new one is written, and each is written to a temporary file and renamed into place, so
+Stage 2 can never pick up an earlier order or a half-written one.
+"""
 
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
 from image_to_cash.extract import ExtractionResult
+from image_to_cash.normalized import NormalizedOrder
 
 ORDER_FILE = "order.json"
 REVIEW_FILE = "review.json"
 
 
-def write_result(result: ExtractionResult, out_dir: Path) -> Path:
+def discard_order(out_dir: Path) -> None:
+    """Remove order.json so a stopped or failed run cannot leave an earlier order for Stage 2."""
+    (out_dir / ORDER_FILE).unlink(missing_ok=True)
+
+
+def clear_results(out_dir: Path) -> None:
+    discard_order(out_dir)
+    (out_dir / REVIEW_FILE).unlink(missing_ok=True)
+
+
+def write_order(normalized: NormalizedOrder, out_dir: Path) -> Path:
+    """The only place order.json is created (`approve` uses it too)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    if not result.needs_review and result.normalized is not None:
-        target = out_dir / ORDER_FILE
-        target.write_text(result.normalized.model_dump_json(indent=2), encoding="utf-8")
-        return target
-    target = out_dir / REVIEW_FILE
+    return _write_atomic(out_dir / ORDER_FILE, normalized.model_dump_json(indent=2) + "\n")
+
+
+def write_result(result: ExtractionResult, out_dir: Path) -> Path:
+    clear_results(out_dir)
+    if result.normalized is not None and not result.needs_review:
+        return write_order(result.normalized, out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return _write_atomic(out_dir / REVIEW_FILE, _review_json(result))
+
+
+def _review_json(result: ExtractionResult) -> str:
     payload = {
-        "reason": "extraction needs review",
+        "reason": (
+            f"{len(result.mismatches)} field(s) not confirmed by OCR, "
+            f"{len(result.issues)} issue(s)"
+        ),
+        "source_image": str(result.source_image),
         "mismatches": [asdict(mismatch) for mismatch in result.mismatches],
         "issues": [asdict(issue) for issue in result.issues],
         "draft_order": result.order.model_dump(mode="json"),
     }
-    target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
+def _write_atomic(target: Path, text: str) -> Path:
+    """Write beside the target, then rename: readers see the old file or the new one, never half."""
+    descriptor, temp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, target)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
     return target
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_extract.py -q`
-Expected: `5 passed`
+Expected: `11 passed`
 
 - [ ] **Step 6: Commit**
 
