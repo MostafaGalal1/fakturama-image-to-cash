@@ -42,6 +42,16 @@ SYSTEM_PROMPT = (
     "JSON Schema:\n" + json.dumps(Order.model_json_schema())
 )
 
+FIELD_PROMPT = (
+    "You read one field of a sales order from a zoomed crop of the order image.\n"
+    "Rules:\n"
+    "- Copy the value exactly as printed. Never compute, round, correct or complete anything.\n"
+    '- Dates as YYYY-MM-DD. Money and quantities as decimal strings with a dot, e.g. "250.00".\n'
+    '- Percentages as decimal strings without the % sign, e.g. "19".\n'
+    '- Reply with {"value": "..."} only, or {"value": null} when the crop does not show that field.'
+)
+FIELD_MAX_OUTPUT_TOKENS = 200
+
 # Orders carry customers' personal data: only route to providers that declare they neither store nor
 # train on prompts.
 PROVIDER_PREFERENCES = {"data_collection": "deny"}
@@ -78,6 +88,12 @@ class OpenRouterReader:
     def read(self, image: Image.Image) -> Order:
         reply = self._post(_request_body(self._model, _data_url(image)))
         return _parse_order(self._model, self._reply_text(reply))
+
+    def read_field(self, crop: Image.Image, field: str) -> str:
+        """Design §4's second look: one field, read again from a zoomed crop."""
+        body = _request_body(self._model, _data_url(crop), system=FIELD_PROMPT, ask=f"Field: {describe_field(field)}.")
+        body["max_tokens"] = FIELD_MAX_OUTPUT_TOKENS
+        return _parse_field(self._model, field, self._reply_text(self._post(body)))
 
     def _post(self, body: dict[str, object]) -> object:
         headers = {"Authorization": f"Bearer {self._api_key}"}
@@ -186,7 +202,9 @@ def _save(image: Image.Image, image_format: str, **options: int) -> bytes:
     return buffer.getvalue()
 
 
-def _request_body(model: str, data_url: str) -> dict[str, object]:
+def _request_body(
+    model: str, data_url: str, *, system: str = SYSTEM_PROMPT, ask: str = "Transcribe this order."
+) -> dict[str, object]:
     return {
         "model": model,
         "temperature": 0,
@@ -194,11 +212,11 @@ def _request_body(model: str, data_url: str) -> dict[str, object]:
         "response_format": {"type": "json_object"},
         "provider": dict(PROVIDER_PREFERENCES),
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system},
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Transcribe this order."},
+                    {"type": "text", "text": ask},
                     {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             },
@@ -212,6 +230,27 @@ def _parse_order(model: str, text: str) -> Order:
     except ValidationError as error:
         problems = describe_validation_error(error)
         raise ReaderError(f"{model}'s reply is not a valid order: {problems}") from error
+
+
+def describe_field(field: str) -> str:
+    """An Order path in words: "items[1].unit_net_price" -> "item line 2: unit net price"."""
+    words = []
+    for piece in field.split("."):
+        name, _, index = piece.partition("[")
+        label = name.replace("_", " ")
+        words.append(f"item line {int(index.rstrip(']')) + 1}" if index and name == "items" else label)
+    return ": ".join(words)
+
+
+def _parse_field(model: str, field: str, text: str) -> str:
+    try:
+        reply = json.loads(_json_object_text(text))
+    except json.JSONDecodeError as error:
+        raise ReaderError(f"{model}'s reply for {field} is not JSON") from error
+    value = reply.get("value") if isinstance(reply, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        raise ReaderError(f"{model} did not find {field} in the crop")
+    return value.strip()
 
 
 def _json_object_text(text: str) -> str:

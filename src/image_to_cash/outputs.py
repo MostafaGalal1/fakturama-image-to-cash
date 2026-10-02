@@ -53,6 +53,7 @@ def _review_json(result: ExtractionResult) -> str:
         "source_image": str(result.source_image.absolute()),
         "mismatches": [asdict(mismatch) for mismatch in result.mismatches],
         "issues": [asdict(issue) for issue in result.issues],
+        "zoomed_retry": None if result.retry is None else asdict(result.retry),
         "draft_order": result.order.model_dump(mode="json"),
     }
     return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
