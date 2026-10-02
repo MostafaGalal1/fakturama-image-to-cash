@@ -50,7 +50,7 @@ def _review_json(result: ExtractionResult) -> str:
             f"{len(result.mismatches)} field(s) not confirmed by OCR, "
             f"{len(result.issues)} issue(s)"
         ),
-        "source_image": str(result.source_image),
+        "source_image": str(result.source_image.absolute()),
         "mismatches": [asdict(mismatch) for mismatch in result.mismatches],
         "issues": [asdict(issue) for issue in result.issues],
         "draft_order": result.order.model_dump(mode="json"),

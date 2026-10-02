@@ -136,11 +136,14 @@ def test_clean_run_removes_an_earlier_review_json(
     assert output_names(out) == ["order.json"]
 
 
+@pytest.mark.parametrize(
+    "ocr_fixture", ["ocr_seeing_everything", "ocr_missing_first_sku"], ids=["order", "review"]
+)
 def test_failed_write_leaves_neither_file(
-    tmp_path, monkeypatch, sample_order_path, order_image, ocr_seeing_everything
+    tmp_path, monkeypatch, request, sample_order_path, order_image, ocr_fixture
 ):
     out = tmp_path / "out"
-    result = extract(order_image, FixtureReader(sample_order_path), ocr_seeing_everything)
+    result = extract(order_image, FixtureReader(sample_order_path), request.getfixturevalue(ocr_fixture))
     write_result(result, out)
 
     def disk_full(*_):
