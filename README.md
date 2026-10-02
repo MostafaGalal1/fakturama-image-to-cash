@@ -14,9 +14,11 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
   Order-first flow through the macOS Accessibility API: Order, Debtor (select or create, with its
   payment method), Products (select or create, with their VAT), save, the linked Invoice, the paid
   status, and verification in Data > Documents. Findings: [docs/spike-macos-ax.md](docs/spike-macos-ax.md).
-- **Windows: built, not yet run against Fakturama.** On Windows, `drive` uses a UI Automation and
-  Win32 backend behind the same `UiBackend` contract, with Windows OCR for the grid checks. Its
-  pure parts are unit-tested on the Mac. The live contract test and a full run need Windows: see
+- **Windows: built and partly run live** in a Windows 11 ARM VM (Parallels) on this Mac. Live
+  so far: the contract test (7 of 8 pass; the other is a test bug, since fixed), the Order header
+  (number, date, Cust.Ref., Net, With VAT) and the payment method (created, then reused on the
+  next run). It stops in the Debtor editor: at 200 % scaling its "address type" row lies below
+  the visible editor. Products, Invoice and paid have not run on Windows yet. See
   [Stage 2 on Windows](#stage-2-on-windows).
 
 ## Setup (macOS)
@@ -244,17 +246,32 @@ To keep a person's own desktop free, run the bot in a VM or a separate Windows s
    other apps while it runs, as long as you don't click into the VM. Make sure the VM is not set to
    pause in the background.
 
-### Unverified until it runs on Windows
+### What the live Windows runs taught
 
-- **Toolbar tooltips:** whether SWT exposes them as UI Automation help text. The flow finds
-  "Create: New Order" and "Save the current contents" that way. The contract test shows it.
-- **Layout:** the `WINDOWS_LAYOUT` values are first guesses: tab strip height, grid header and row
-  height, and the navigation area.
-- **Grids:** they are assumed to be childless `Pane` controls, read through the clipboard, as on
-  macOS.
-- **Pop-ups:** `choose` expands the combo box and clicks the list item.
-- **Preference file:** the path is assumed to be the macOS one under the user's home folder
-  (`.fakturama2\...`).
+Fixed in the code:
+
+- **Tooltips:** fields, pop-ups and icons show no tooltips to UI Automation; toolbar buttons
+  carry theirs as their name. `drive/fakturama/controls.py` finds each control by tooltip, else
+  by its label, its values or its place (a section's first icon).
+- **Labels:** a label is only as wide as its text, so a field's distance is measured from the
+  label column's right edge.
+- **Hidden controls:** SWT's tab folders and links claim to be offscreen while shown, so hiding is
+  read from window visibility. Tab headers report their frames in points at high DPI.
+- **Clipboard deadlock:** the clipboard's owner window must answer messages. It runs on its own
+  thread; otherwise Fakturama's copy (and Parallels' clipboard sync) waited on it with the
+  clipboard locked.
+- **Start of a run:** the bot keeps the display on, wakes it, and minimizes its own terminal,
+  which otherwise covered Fakturama.
+- **"Save Parts":** it lists the parts as rows whose ticks Windows does not report, so nothing
+  presses its OK. The contract test closes editors one by one instead.
+
+Still open:
+
+- **Editor height:** at 200 % scaling the editor shows about 385 points, so a Debtor's "address
+  type" row is out of view. Use 100–150 % scaling, or drag Fakturama's divider between the
+  editor and the lists lower. The flow does not scroll editors yet.
+- **Unverified:** the row-header offset (`row_header_dx`) is unmeasured, and products, invoice
+  and paid have not run.
 
 ## Known limitations
 
