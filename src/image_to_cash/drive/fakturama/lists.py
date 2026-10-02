@@ -21,7 +21,7 @@ GRID_DY = 80  # below the search row, inside the grid
 VIEW_TIMEOUT = 15
 LIST_ATTEMPTS = 3  # a list can lag a save by a moment
 ROW_X = 150  # into a row's text, clear of the grid's left edge
-TREE_DY, TREE_WIDTH = 20, 170  # Documents' category tree: below the view's tabs, at its left
+TREE_WIDTH = 170  # Documents' category tree, at the view's left below its tabs
 
 
 def search_view(
@@ -79,7 +79,8 @@ def pick_category(ctx: Context, name: str) -> None:
     """Clicks `name` in the view's category tree, found by OCR (the tree's items are not listed
     to accessibility), and waits for the view's filter label to show it."""
     view = ctx.wb.view_area()
-    tree = Rect(view.x, view.y + TREE_DY, TREE_WIDTH, view.height - TREE_DY)
+    strip = ctx.ui.layout.tab_strip
+    tree = Rect(view.x, view.y + strip, TREE_WIDTH, view.height - strip)
     with TemporaryDirectory() as scratch:
         shot = ctx.ui.capture(tree, Path(scratch) / "tree.png")
         with Image.open(shot) as image:
