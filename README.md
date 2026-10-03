@@ -1,28 +1,40 @@
 # Fakturama Image-to-Cash
 
 Turns a single order image into a saved, verified Order and linked Invoice in Fakturama.
-Design: [docs/DESIGN.md](docs/DESIGN.md).
+Windows with Microsoft UI Automation is the main path, as the brief requires; the same flow also
+runs on macOS through its Accessibility API. Design: [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Status
 
 - **Stage 1 (extract): done.**
   - The output is `order.json`, or `review.json` when anything can't be confirmed.
-  - A vision model reads the image through OpenRouter. macOS Vision OCR then confirms every
-    critical field, and exact decimal arithmetic checks the totals.
+  - A vision model reads the image through OpenRouter. OCR (Windows OCR, or macOS Vision on a
+    Mac) then confirms every critical field, and exact decimal arithmetic checks the totals.
   - Run log: [docs/extraction-run-notes.md](docs/extraction-run-notes.md).
-- **Stage 2 (drive Fakturama): done on macOS.** `image-to-cash drive order.json` runs the brief's
-  Order-first flow through the macOS Accessibility API: Order, Debtor (select or create, with its
-  payment method), Products (select or create, with their VAT), save, the linked Invoice, the paid
-  status, and verification in Data > Documents. Findings: [docs/spike-macos-ax.md](docs/spike-macos-ax.md).
-  Re-run green after the later changes (resume check, Documents categories, measured rows): a live
-  extraction of the clean image, then Order PO000002 and Invoice INV000002 in about 2.5 minutes.
-  - **Batch on the Mac** (OpenRouter reader, macOS Vision). The clean sample was found already
-    entered (PO000001 and INV000001) and counted as done without a second entry. A copy of it
-    with the reference changed to B17 was read and entered as Order PO000003 and Invoice
-    INV000003, paid and verified, in about 2 minutes. The pixelated copy went to `review/`
-    untouched, because OpenRouter answered "no credit" (HTTP 402) that time.
-  - **Discard on the Mac** closed ten saved editors in 12 seconds.
-- **Checked live in the Windows VM:** a re-run of an entered order stops as already entered; a
+- **Stage 2 on Windows (UI Automation): green end to end.** `image-to-cash drive order.json` runs
+  the brief's Order-first flow: Order, Debtor (select or create, with its payment method),
+  Products (select or create, with their VAT), save, the linked Invoice, the paid status, and
+  verification in Data > Documents. In a Windows 11 ARM VM (Parallels) on this Mac, on the
+  `order.json` of the clean sample: Order PO000002 and Invoice INV000002 saved, the Invoice paid,
+  both verified in Data > Documents, in about 1.5 minutes. Earlier runs on the same database
+  covered the create paths: payment method, Debtor with a separate delivery address, and both
+  Products. See [Stage 2 on Windows](#stage-2-on-windows).
+  - **At 100 % scaling** (the same VM, set to "Scaled"): a new Debtor, two new Products, Order
+    PO000007 and Invoice INV000006, saved and verified. Three fixes came out of it: a wider
+    label-to-field gap (the gross price field sits 22 points off its column), the Documents tree
+    enlarged before OCR (Windows OCR missed "Orders" at that size), and the toolbar's Contact
+    button as a fallback (after Fakturama restarted, the left panel's New Contact opened a saved
+    Debtor). The run stopped once on each; after each fix, `discard` and a re-run. The last run
+    found the saved Order and resumed at the Invoice.
+  - **At 150 %** (1920 × 1200, so 1280 × 800 points): a new Debtor and two new Products, then
+    Order PO000008 and Invoice INV000007, paid and verified, in about 2 minutes. Fixes on the way:
+    the Documents list is found between its search row and its bottom edge (on a smaller screen
+    the whole view was 80 points tall), a category scrolled out of a short tree is selected by
+    typing its name, and an icon belongs to the label it starts under (the address icons start
+    47 points into "Addresses", so the Product picker had been clicked). A screen below about
+    1280 × 720 points leaves the Order editor too short: the bot stops, as it does not scroll
+    editors.
+- **Also checked live on Windows:** a re-run of an entered order stops as already entered; a
   near-duplicate Debtor ("Northstar Office GmbH & Co") and Product (`CHR-ERG-010`) are created
   beside the originals and the exact rows are picked; a reused VAT rate is opened and its code S
   confirmed; a near-miss contact ("Kline" for "Klein") stops for review.
@@ -37,26 +49,63 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
     OCR). Windows OCR misses the item table's short percent cells; exact sums confirm them (see
     [How it decides](#how-it-decides)). The clean A17 sample also passed extraction, then stopped
     in Fakturama, because the VM's test database holds five documents with that reference.
-- **Windows: green end to end** in a Windows 11 ARM VM (Parallels) on this Mac, on the same
-  `order.json`: Order PO000002 and Invoice INV000002 saved, the Invoice paid, both verified in
-  Data > Documents, in about 1.5 minutes. Earlier runs on the same database covered the create
-  paths: payment method, Debtor with a separate delivery address, and both Products. See
-  [Stage 2 on Windows](#stage-2-on-windows).
-  - **At 100 % scaling** (the same VM, set to "Scaled"): a new Debtor, two new Products, Order
-    PO000007 and Invoice INV000006, saved and verified. Three fixes came out of it: a wider
-    label-to-field gap (the gross price field sits 22 points off its column), the Documents tree
-    enlarged before OCR (Windows OCR missed "Orders" at that size), and the toolbar's Contact
-    button as a fallback (after Fakturama restarted, the left panel's New Contact opened a saved
-    Debtor). The run stopped once on each; after each fix, `discard` and a re-run. The last run
-    found the saved Order and resumed at the Invoice.
-  - **At 150 %** the VM's screen is about 1008 × 556 points, smaller than a real 150 % display
-    (1920 × 1080 gives 1280 × 720). The run passed the already-entered check in Data > Documents
-    and opened the Order, after two fixes: the Documents list is found between its search row and
-    its bottom edge (the whole view was 80 points tall), and a category scrolled out of the short
-    tree is selected by typing its name. The Order editor itself did not fit: its item grid showed
-    no rows, and the bot stopped rather than click an icon something else covered.
+- **Stage 2 on macOS: done**, the same flow through the macOS Accessibility API. Findings:
+  [docs/spike-macos-ax.md](docs/spike-macos-ax.md).
+  Re-run green after the later changes (resume check, Documents categories, measured rows): a live
+  extraction of the clean image, then Order PO000002 and Invoice INV000002 in about 2.5 minutes.
+  - **Batch on the Mac** (OpenRouter reader, macOS Vision). The clean sample was found already
+    entered (PO000001 and INV000001) and counted as done without a second entry. A copy of it
+    with the reference changed to B17 was read and entered as Order PO000003 and Invoice
+    INV000003, paid and verified, in about 2 minutes. The pixelated copy went to `review/`
+    untouched, because OpenRouter answered "no credit" (HTTP 402) that time.
+  - **Discard on the Mac** closed ten saved editors in 12 seconds.
+  - **Re-checked after the Windows scaling fixes:** a new Debtor and two new Products, then
+    Order PO000004 and Invoice INV000004, paid and verified, in about 2.5 minutes. One fix: an
+    address tab is read once a fresh scan shows it selected (a fixed half second had been too short
+    while the tabs redrew).
 
-## Setup (macOS)
+## Setup and run on Windows
+
+Tested on Windows 11 (ARM, in a Parallels VM) at 100 %, 150 % and 200 % display scaling.
+
+1. Install Fakturama 2.2 for Windows and create its workspace. Set *Settings… > General >
+   Currency locale* = **Germany**, then quit and restart Fakturama once: the preference file the
+   bot checks is written on quit.
+2. Install [Git for Windows](https://git-scm.com/download/win) and
+   [uv](https://docs.astral.sh/uv/getting-started/installation/).
+3. In PowerShell:
+
+   ```powershell
+   git clone https://github.com/MostafaGalal1/fakturama-image-to-cash.git
+   cd fakturama-image-to-cash
+   uv sync
+   uv run pytest -q
+   ```
+
+4. For the live reader, put an [OpenRouter](https://openrouter.ai) API key in a git-ignored
+   `.env`. This prompts for it without echoing:
+
+   ```powershell
+   $key = Read-Host "OpenRouter key" -AsSecureString
+   "OPENROUTER_API_KEY=$([Net.NetworkCredential]::new('', $key).Password)" | Set-Content -Encoding ascii .env
+   ```
+
+5. Start Fakturama, leave it on its start page and keep your hands off the PC while the bot runs:
+   it sends a click or key only while Fakturama has the foreground window and the keyboard focus.
+
+   ```powershell
+   uv run --env-file .env image-to-cash extract samples\sales-order-input-clean.png --reader openrouter --out out\clean
+   uv run image-to-cash drive out\clean\order.json --out out\drive
+   ```
+
+   Or a whole folder of images, unattended: `uv run --env-file .env image-to-cash batch inbox`
+   (see [Unattended](#unattended-a-folder-of-orders)).
+
+Exit codes, outputs and review work as described under [Usage](#usage) and
+[Stage 2](#stage-2-enter-the-order-into-fakturama). How the Windows backend works, and what the
+live runs taught: [Stage 2 on Windows](#stage-2-on-windows).
+
+## Setup on macOS
 
 ```bash
 uv sync
@@ -129,7 +178,7 @@ best guess goes into Fakturama as if it were checked (see the run notes, section
 
 ## Stage 2: enter the order into Fakturama
 
-### One-time setup
+### One-time setup (macOS)
 
 1. Install Fakturama 2.2 and create its workspace (the bot was developed against
    `~/Desktop/Database`, the default when the workspace is the Desktop).
@@ -143,7 +192,7 @@ best guess goes into Fakturama as if it were checked (see the run notes, section
    preferences in the database too, so restoring an older copy also restores its currency locale:
    set it to Germany again if the bot stops with `fakturama_currency_not_eur`.
 
-### Run
+### Run (macOS)
 
 Start Fakturama, leave it on its start page, then leave the Mac alone while the bot runs (about
 10 minutes; it refuses to send any click or keystroke unless Fakturama has the keyboard focus and
@@ -258,7 +307,7 @@ To keep a person's own desktop free, run the bot in a VM or a separate Windows s
    `.env` behind: `drive` does not use the OpenRouter key. Then, in PowerShell in the VM:
 
    ```powershell
-   git clone -b feat/windows-backend fakturama-image-to-cash.bundle fakturama-image-to-cash
+   git clone fakturama-image-to-cash.bundle fakturama-image-to-cash
    cd fakturama-image-to-cash
    uv sync
    uv run pytest -q
@@ -354,9 +403,9 @@ Still open:
   would still go to review.
 - Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
   stopped them, but they are not usable as readers.
-- Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % and 100 %
-  scaling. At 150 % the VM's small screen leaves the Order editor too short to work in (the flow
-  does not scroll editors); x64 PCs have not been tried (see
+- Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 100 %, 150 % and 200 %
+  scaling. A screen below about 1280 × 720 points leaves the Order editor too short to work in
+  (the flow does not scroll editors); x64 PCs have not been tried (see
   [what the live Windows runs taught](#what-the-live-windows-runs-taught)).
 - A re-run never enters an order twice. Before creating anything it searches Data > Documents
   for the reference: a saved Order without its Invoice resumes at the Invoice, Order plus Invoice
@@ -415,10 +464,7 @@ In priority order, each item is about trust in an unattended run. Done since the
 discarding a stop's editors so a batch goes on, and measured rows in the selectors and lists.
 
 1. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
-   Windows 11 ARM VM at 200 % and 100 % scaling. Next: an x64 PC and 150 %, measure
-   `row_header_dx`, and scroll editors so the flow does not depend on the editor's height.
-2. **A second OCR engine for table cells on Windows** (Tesseract, for example): Windows OCR
-   misses short cells even zoomed and alone. Exact sums now confirm a missed discount or a single
-   missed VAT rate; two or more missed VAT rates still need a person.
-3. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
+   Windows 11 ARM VM at 100 %, 150 % and 200 % scaling. Next: an x64 PC, and measure
+   `row_header_dx`.
+2. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
    values, annotated screenshots) for whoever reviews a stopped run.

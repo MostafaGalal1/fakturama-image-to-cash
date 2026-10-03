@@ -16,7 +16,6 @@ from image_to_cash.drive.elements import Element, Rect, Role
 ROW_TOLERANCE = 6.0  # points between vertical centres that still count as one row
 MAX_LABEL_GAP = 30.0  # points from a label's column to its first field (Price (gross) sits 22 off at 100 % on Windows)
 LABEL_OVERLAP = 2.0  # a field may start this far inside the label's frame
-ICON_COLUMN = 40.0  # points an icon may sit right of the label it belongs under
 
 
 class LocatorError(LookupError):
@@ -91,13 +90,16 @@ def by_value(elements: Sequence[Element], role: Role, values: frozenset[str]) ->
 
 
 def image_below(elements: Sequence[Element], text: str) -> Element:
-    """The first icon under the label `text`, in its column: a section's first action."""
+    """The first icon under the label `text` that starts within the label's width: a section's
+    first action. At 150 % scaling the Order's address icons start 47 points into "Addresses"."""
     anchor = label(elements, text).rect
     below = sorted(
         (
             e
             for e in elements
-            if e.role is Role.IMAGE and e.rect.y >= anchor.bottom - LABEL_OVERLAP and abs(e.rect.x - anchor.x) <= ICON_COLUMN
+            if e.role is Role.IMAGE
+            and e.rect.y >= anchor.bottom - LABEL_OVERLAP
+            and anchor.x - LABEL_OVERLAP <= e.rect.x <= anchor.right
         ),
         key=lambda e: e.rect.y,
     )
