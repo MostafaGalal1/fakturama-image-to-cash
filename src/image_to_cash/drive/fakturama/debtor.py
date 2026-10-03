@@ -24,6 +24,7 @@ from image_to_cash.normalized import Debtor
 
 SELECTOR = "Select the address"
 NEW_DEBTOR = "New Debtor"
+NEW_CONTACT_BUTTON = "Create a new contact"  # the main toolbar's Contact button
 INVOICE_ROLE, DELIVERY_ROLE = "Invoice address", "Delivery address"
 EXTRA_ADDRESS_TAB = "additional address #1"
 TOGGLE_CLOSE_SECONDS = 1.5  # macOS closes the role window on the second ▶ press within this
@@ -87,11 +88,25 @@ def _addresses_match(ctx: Context, order: OrderEditor, debtor: Debtor) -> bool:
     )
 
 
+def open_new_debtor(ctx: Context) -> None:
+    """Brief §2.5: New Contact in the left panel. In the Windows VM, after Fakturama restarted,
+    that link opened a saved Debtor instead; the toolbar's Contact button, which opens the same
+    New Debtor editor, is the fallback."""
+    try:
+        ctx.wb.click_nav("New Contact", opened=lambda: ctx.wb.active_editor_title() == NEW_DEBTOR)
+    except NeedsReview as stop:
+        if stop.reason != "navigation_failed":
+            raise
+        ctx.record("new_contact_link", Outcome.DONE, opened="another editor", fallback="toolbar Contact button")
+        ctx.ui.press(ctx.wb.toolbar_button(NEW_CONTACT_BUTTON))
+        ctx.wb.wait_for_editor_tab(lambda title: title == NEW_DEBTOR, NEW_DEBTOR)
+
+
 def create_debtor(ctx: Context, debtor: Debtor, method: PaymentMethod) -> None:
     """Brief §2.5-2.11, leaving the Order tab open. The payment method is made sure of first: an
     open Debtor editor lists the methods it found when it opened, never one saved after."""
     ensure_payment_method(ctx, method)
-    ctx.wb.click_nav("New Contact", opened=lambda: ctx.wb.active_editor_title() == NEW_DEBTOR)
+    open_new_debtor(ctx)
     fields = ctx.wb.scan_editor(lambda found: right_of_label(found, "Company", role=Role.TEXT_AREA), "the New Debtor editor")
     set_text(ctx.ui, right_of_label(fields, "Company", role=Role.TEXT_AREA), debtor.company, label="company", commit=None)
     set_text(ctx.ui, right_of_label(fields, "First Name Last Name", nth=0), debtor.first_name, label="first_name")

@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from image_to_cash.drive.elements import Element, Rect, Role
 
 ROW_TOLERANCE = 6.0  # points between vertical centres that still count as one row
-MAX_LABEL_GAP = 20.0  # points from a label's right edge to its first field
+MAX_LABEL_GAP = 30.0  # points from a label's column to its first field (Price (gross) sits 22 off at 100 % on Windows)
 LABEL_OVERLAP = 2.0  # a field may start this far inside the label's frame
 ICON_COLUMN = 40.0  # points an icon may sit right of the label it belongs under
 

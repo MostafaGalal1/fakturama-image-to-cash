@@ -15,6 +15,7 @@ from image_to_cash.drive.fakturama.context import Context
 from image_to_cash.drive.fakturama.grids import SETTLE_SECONDS, copy_all, grid_at, has_rows, measure_rows, row_y
 from image_to_cash.drive.locate import LocatorError, by_title, right_of_label
 from image_to_cash.drive.waits import wait_until
+from image_to_cash.imaging import upscale
 from image_to_cash.errors import NeedsReview
 
 Row = TypeVar("Row")
@@ -91,8 +92,9 @@ def pick_category(ctx: Context, name: str) -> None:
     with TemporaryDirectory() as scratch:
         shot = ctx.ui.capture(tree, Path(scratch) / "tree.png")
         with Image.open(shot) as image:
-            scale = image.width / tree.width
-            boxes = [box for box in ctx.ocr.recognize(image.convert("RGB")) if tree_label(box.text) == name]
+            enlarged = upscale(image.convert("RGB"))  # at 100 % scaling Windows OCR missed "Orders"
+            scale = enlarged.width / tree.width
+            boxes = [box for box in ctx.ocr.recognize(enlarged) if tree_label(box.text) == name]
     if len(boxes) != 1:
         raise NeedsReview("category_not_found", {"category": name})
     x = tree.x + (boxes[0].box.x + boxes[0].box.width / 2) / scale
