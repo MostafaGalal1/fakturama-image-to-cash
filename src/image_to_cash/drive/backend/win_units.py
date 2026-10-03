@@ -55,8 +55,9 @@ class DoubleClick:
     reach: int
 
     def wait_before(self, last: tuple[float, int, int] | None, now: float, x: int, y: int) -> float:
-        """Seconds to wait so a single click at (x, y) is not read as the second half of a double
-        click with the `last` one (time, x, y): the selector's row would then be accepted."""
+        """Seconds to wait so a click at (x, y) is not read as the second half of a double click
+        with the `last` one (time, x, y): a single click would accept the selector's row, and a
+        double click would reach the grid as one click (the row it should open only selected)."""
         if last is None:
             return 0.0
         then, last_x, last_y = last

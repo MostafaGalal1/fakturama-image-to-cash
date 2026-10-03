@@ -211,8 +211,7 @@ class WindowsUiaBackend:
         except WaitTimeout:
             raise UnsafeToAct(f"something else covers the target at ({x:.0f}, {y:.0f}); refusing to click") from None
         pixel = self._scale.to_pixels(x, y)
-        if count == 1:
-            time.sleep(self._double_click.wait_before(self._last_click, time.monotonic(), *pixel))
+        time.sleep(self._double_click.wait_before(self._last_click, time.monotonic(), *pixel))
         self._guard()
         win32.click_at(*pixel, count)
         self._last_click = (time.monotonic(), *pixel)
