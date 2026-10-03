@@ -16,6 +16,7 @@ from image_to_cash.drive.formats import GERMAN, format_amount, parse_amount
 from image_to_cash.drive.fakturama import controls as find
 from image_to_cash.drive.locate import LocatorError, by_title, label, right_of_label
 from image_to_cash.drive.report import Outcome
+from image_to_cash.drive.waits import wait_until
 from image_to_cash.errors import NeedsReview
 from image_to_cash.model import Totals
 from image_to_cash.normalized import NormalizedOrder, OrderLine
@@ -25,6 +26,7 @@ QTY, UNIT_PRICE, DISCOUNT = "Qty.", "U.Price", "Discount"
 GRID_DX = 250  # from the "Items" label into the grid
 
 
+TAB_TIMEOUT = 5  # seconds for an address tab to show selected
 FOLLOW_UP_INVOICE_HELP = frozenset({"Create: New Invoice", "Invoice"})  # Windows: a toolbar button's help is its name
 
 
@@ -53,10 +55,22 @@ class DocumentEditor:
             radio = by_title(controls, Role.RADIO, tab)
             if self.ctx.ui.refresh(radio).value != "True":
                 self.ctx.ui.click(radio)
-                self.ctx.sleep(0.5)
+                self._wait_selected(tab)
             texts.append(shown(self.ctx.ui, self._address_block(self.scan())))
         delivery, invoice = texts
         return invoice, delivery
+
+    def _wait_selected(self, tab: str) -> None:
+        """Until a fresh scan shows `tab` selected. The folder redraws its tabs after a click: a
+        tab read meanwhile on macOS was gone by the next click, and a block read too early would
+        be the other tab's."""
+        wait_until(
+            lambda: by_title(self.scan(), Role.RADIO, tab).value == "True",
+            what=f"the {tab} tab",
+            timeout=TAB_TIMEOUT,
+            poll=0.2,
+            ignoring=(LocatorError,),
+        )
 
     def _address_block(self, controls: tuple[Element, ...]) -> Element:
         picker = find.address_picker(controls)
