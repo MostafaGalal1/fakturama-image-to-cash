@@ -26,7 +26,10 @@ runs on macOS through its Accessibility API. Design: [docs/DESIGN.md](docs/DESIG
     enlarged before OCR (Windows OCR missed "Orders" at that size), and the toolbar's Contact
     button as a fallback (after Fakturama restarted, the left panel's New Contact opened a saved
     Debtor). The run stopped once on each; after each fix, `discard` and a re-run. The last run
-    found the saved Order and resumed at the Invoice.
+    found the saved Order and resumed at the Invoice. Re-checked after the 150 % fixes on a new
+    order: Order PO000011 and Invoice INV000010, paid and verified. One more fix: a double click
+    now waits out an earlier click on the same spot, as a single click already did (Windows had
+    paired the two, so a saved VAT rate's row was only selected, not opened).
   - **At 150 %** (1920 × 1200, so 1280 × 800 points): a new Debtor and two new Products, then
     Order PO000008 and Invoice INV000007, paid and verified, in about 2 minutes. Fixes on the way:
     the Documents list is found between its search row and its bottom edge (on a smaller screen
