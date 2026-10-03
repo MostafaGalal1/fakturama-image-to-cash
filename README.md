@@ -18,7 +18,8 @@ runs on macOS through its Accessibility API. Design: [docs/DESIGN.md](docs/DESIG
   `order.json` of the clean sample: Order PO000002 and Invoice INV000002 saved, the Invoice paid,
   both verified in Data > Documents, in about 1.5 minutes. Earlier runs on the same database
   covered the create paths: payment method, Debtor with a separate delivery address, and both
-  Products. See [Stage 2 on Windows](#stage-2-on-windows).
+  Products. See [Stage 2 on Windows](#stage-2-on-windows), and the
+  [recording](docs/recording/windows-150.mp4) of a run at 150 %.
   - **At 100 % scaling** (the same VM, set to "Scaled"): a new Debtor, two new Products, Order
     PO000007 and Invoice INV000006, saved and verified. Three fixes came out of it: a wider
     label-to-field gap (the gross price field sits 22 points off its column), the Documents tree
@@ -244,6 +245,11 @@ Annotated screenshots of that run, in order:
 
 ![Paid invoice and both documents](docs/screenshots/13-documents-final.png)
 
+**Recording:** [docs/recording/windows-150.mp4](docs/recording/windows-150.mp4), under 2 minutes at
+2× speed. A Windows run at 150 % scaling creates a new Debtor and two Products, then saves Order
+PO000010 and Invoice INV000009, paid, and checks both in Data > Documents. The caption bar names
+the last step the bot finished and checked, from its `run.jsonl`. Only the VM's screen was recorded.
+
 ### How it decides
 
 - **Reuse or create.** The Debtor is reused only when one row matches Company, First Name, Name,
@@ -466,5 +472,5 @@ discarding a stop's editors so a batch goes on, and measured rows in the selecto
 1. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
    Windows 11 ARM VM at 100 %, 150 % and 200 % scaling. Next: an x64 PC, and measure
    `row_header_dx`.
-2. **A recording instead of stills**, and the run report as one HTML page (steps, read-back
-   values, annotated screenshots) for whoever reviews a stopped run.
+2. **The run report as one HTML page** (steps, read-back values, annotated screenshots) for
+   whoever reviews a stopped run.
