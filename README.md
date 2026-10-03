@@ -49,6 +49,12 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
     button as a fallback (after Fakturama restarted, the left panel's New Contact opened a saved
     Debtor). The run stopped once on each; after each fix, `discard` and a re-run. The last run
     found the saved Order and resumed at the Invoice.
+  - **At 150 %** the VM's screen is about 1008 × 556 points, smaller than a real 150 % display
+    (1920 × 1080 gives 1280 × 720). The run passed the already-entered check in Data > Documents
+    and opened the Order, after two fixes: the Documents list is found between its search row and
+    its bottom edge (the whole view was 80 points tall), and a category scrolled out of the short
+    tree is selected by typing its name. The Order editor itself did not fit: its item grid showed
+    no rows, and the bot stopped rather than click an icon something else covered.
 
 ## Setup (macOS)
 
@@ -349,7 +355,8 @@ Still open:
 - Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
   stopped them, but they are not usable as readers.
 - Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % and 100 %
-  scaling. 150 % and x64 PCs have not been tried (see
+  scaling. At 150 % the VM's small screen leaves the Order editor too short to work in (the flow
+  does not scroll editors); x64 PCs have not been tried (see
   [what the live Windows runs taught](#what-the-live-windows-runs-taught)).
 - A re-run never enters an order twice. Before creating anything it searches Data > Documents
   for the reference: a saved Order without its Invoice resumes at the Invoice, Order plus Invoice

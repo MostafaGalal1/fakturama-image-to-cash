@@ -19,12 +19,12 @@ from image_to_cash.imaging import upscale
 from image_to_cash.errors import NeedsReview
 
 Row = TypeVar("Row")
-GRID_DY = 80  # below the search row, inside the grid
 VIEW_TIMEOUT = 15
 LIST_ATTEMPTS = 3  # a list can lag a save by a moment
 ROW_X = 150  # into a row's text, clear of the grid's left edge
 TREE_ARROW = re.compile(r"^\W+")  # a leading expand arrow, read as >, › or similar
 TREE_WIDTH = 170  # Documents' category tree, at the view's left below its tabs
+TREE_ROW_DX, TREE_ROW_DY = 40, 8  # into the tree's first row, past its icon
 
 
 def search_view(
@@ -51,8 +51,7 @@ def search_view(
     ui.paste_text(text, search)
     ctx.sleep(SETTLE_SECONDS)
     ctx.wb.check_errors()
-    view = ctx.wb.view_area()
-    grid = grid_at(ui, view.center[0], view.y + GRID_DY, menu[-1])
+    grid = _grid_below(ctx, search, menu[-1])
     if not has_rows(ui, ctx.ocr, grid):
         return ()
     return parse(copy_all(ui, grid, rows=measure_rows(ui, ctx.ocr, grid)))
@@ -85,30 +84,43 @@ def tree_label(text: str) -> str:
 
 def pick_category(ctx: Context, name: str) -> None:
     """Clicks `name` in the view's category tree, found by OCR (the tree's items are not listed
-    to accessibility), and waits for the view's filter label to show it."""
+    to accessibility), and waits for the view's filter label to show it. A short view (the
+    Documents view at 150 % scaling showed two rows) can hold the item out of sight: then the
+    tree's first row takes the focus, and typing the name selects the item that starts with it."""
     view = ctx.wb.view_area()
     strip = ctx.ui.layout.tab_strip
     tree = Rect(view.x, view.y + strip, TREE_WIDTH, view.height - strip)
-    with TemporaryDirectory() as scratch:
-        shot = ctx.ui.capture(tree, Path(scratch) / "tree.png")
-        with Image.open(shot) as image:
-            enlarged = upscale(image.convert("RGB"))  # at 100 % scaling Windows OCR missed "Orders"
-            scale = enlarged.width / tree.width
-            boxes = [box for box in ctx.ocr.recognize(enlarged) if tree_label(box.text) == name]
-    if len(boxes) != 1:
+    seen = _category_in_sight(ctx, tree, name)
+    if len(seen) > 1:
         raise NeedsReview("category_not_found", {"category": name})
-    x = tree.x + (boxes[0].box.x + boxes[0].box.width / 2) / scale
-    y = tree.y + (boxes[0].box.y + boxes[0].box.height / 2) / scale
+    x, y = seen[0] if seen else (tree.x + TREE_ROW_DX, tree.y + TREE_ROW_DY)
     item = ctx.ui.element_at(x, y)
     if item is None:
         raise NeedsReview("category_not_found", {"category": name})
-    ctx.ui.click(item, at=(x, y))
+    ctx.ui.click(item, at=(x, y) if seen else None)  # any first-row item takes the focus
+    if not seen:
+        for char in name.casefold():  # keys, not type_text: the first letter moves the focus to an item
+            ctx.ui.key(char)
     wait_until(
         lambda: any(e.role is Role.LABEL and e.value == name for e in ctx.ui.scan(ctx.wb.view_area())),
         what=f"the {name} category",
         timeout=5,
         poll=0.3,
     )
+
+
+def _category_in_sight(ctx: Context, tree: Rect, name: str) -> list[tuple[float, float]]:
+    """Screen centres of the tree lines OCR reads as `name`."""
+    with TemporaryDirectory() as scratch:
+        shot = ctx.ui.capture(tree, Path(scratch) / "tree.png")
+        with Image.open(shot) as image:
+            enlarged = upscale(image.convert("RGB"))  # at 100 % scaling Windows OCR missed "Orders"
+            scale = enlarged.width / tree.width
+            boxes = [box for box in ctx.ocr.recognize(enlarged) if tree_label(box.text) == name]
+    return [
+        (tree.x + (box.box.x + box.box.width / 2) / scale, tree.y + (box.box.y + box.box.height / 2) / scale)
+        for box in boxes
+    ]
 
 
 def view_button(ctx: Context, help_text: str) -> Element:
@@ -122,6 +134,12 @@ def view_button(ctx: Context, help_text: str) -> Element:
 
 def open_row(ctx: Context, index: int, what: str) -> None:
     """Double-clicks row `index` of the list the last search_view showed, which opens its editor."""
-    view = ctx.wb.view_area()
-    grid = grid_at(ctx.ui, view.center[0], view.y + GRID_DY, what)
+    grid = _grid_below(ctx, right_of_label(ctx.ui.scan(ctx.wb.view_area()), "Search:"), what)
     ctx.ui.click(grid, at=(grid.rect.x + ROW_X, row_y(ctx.ui.layout, grid, index)), count=2)
+
+
+def _grid_below(ctx: Context, search: Element, what: str) -> Element:
+    """The view's grid, halfway between its search row and its bottom edge. A fixed depth missed
+    it at 150 % scaling, where the whole view was 80 points tall."""
+    view = ctx.wb.view_area()
+    return grid_at(ctx.ui, view.center[0], (search.rect.bottom + view.bottom) / 2, what)
