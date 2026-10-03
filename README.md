@@ -38,6 +38,9 @@ runs on macOS through its Accessibility API. Design: [docs/DESIGN.md](docs/DESIG
     47 points into "Addresses", so the Product picker had been clicked). A screen below about
     1280 × 720 points leaves the Order editor too short: the bot stops, as it does not scroll
     editors.
+  - **At 200 %**, re-checked with all the fixes above (2680 × 1676, so 1340 × 838 points): a new
+    Debtor and two new Products, then Order PO000012 and Invoice INV000011, paid and verified, in
+    about 4 minutes, without a stop.
 - **Also checked live on Windows:** a re-run of an entered order stops as already entered; a
   near-duplicate Debtor ("Northstar Office GmbH & Co") and Product (`CHR-ERG-010`) are created
   beside the originals and the exact rows are picked; a reused VAT rate is opened and its code S
