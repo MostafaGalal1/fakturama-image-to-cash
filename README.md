@@ -42,6 +42,13 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
   Data > Documents, in about 1.5 minutes. Earlier runs on the same database covered the create
   paths: payment method, Debtor with a separate delivery address, and both Products. See
   [Stage 2 on Windows](#stage-2-on-windows).
+  - **At 100 % scaling** (the same VM, set to "Scaled"): a new Debtor, two new Products, Order
+    PO000007 and Invoice INV000006, saved and verified. Three fixes came out of it: a wider
+    label-to-field gap (the gross price field sits 22 points off its column), the Documents tree
+    enlarged before OCR (Windows OCR missed "Orders" at that size), and the toolbar's Contact
+    button as a fallback (after Fakturama restarted, the left panel's New Contact opened a saved
+    Debtor). The run stopped once on each; after each fix, `discard` and a re-run. The last run
+    found the saved Order and resumed at the Invoice.
 
 ## Setup (macOS)
 
@@ -341,8 +348,8 @@ Still open:
   would still go to review.
 - Free OpenRouter vision models misread about half the fields of the pixelated copy. The checks
   stopped them, but they are not usable as readers.
-- Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % scaling. Other
-  Windows scalings and x64 PCs have not been tried (see
+- Stage 2 has run end to end on macOS and on Windows 11 ARM in a VM at 200 % and 100 %
+  scaling. 150 % and x64 PCs have not been tried (see
   [what the live Windows runs taught](#what-the-live-windows-runs-taught)).
 - A re-run never enters an order twice. Before creating anything it searches Data > Documents
   for the reference: a saved Order without its Invoice resumes at the Invoice, Order plus Invoice
@@ -401,7 +408,7 @@ In priority order, each item is about trust in an unattended run. Done since the
 discarding a stop's editors so a batch goes on, and measured rows in the selectors and lists.
 
 1. **Windows on a real PC**, since the brief's reference platform is Windows. It ran green in a
-   Windows 11 ARM VM at 200 % scaling. Next: an x64 PC at 100 % and 150 %, measure
+   Windows 11 ARM VM at 200 % and 100 % scaling. Next: an x64 PC and 150 %, measure
    `row_header_dx`, and scroll editors so the flow does not depend on the editor's height.
 2. **A second OCR engine for table cells on Windows** (Tesseract, for example): Windows OCR
    misses short cells even zoomed and alone. Exact sums now confirm a missed discount or a single
